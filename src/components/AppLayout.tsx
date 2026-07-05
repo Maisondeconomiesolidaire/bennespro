@@ -233,7 +233,7 @@ function SidebarContent({
         <button
           type="button"
           onClick={onNewDepot}
-          className="flex w-full items-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(42,167,155,0.25)] transition hover:bg-brand-600"
+          className="flex w-full items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent)]"
         >
           <PackagePlus className="h-[18px] w-[18px]" /> Nouveau dépôt
         </button>

@@ -65,6 +65,7 @@ export function NewDepotWizard({
   const [newVehicleLabel, setNewVehicleLabel] = useState("");
   const [newVehiclePlate, setNewVehiclePlate] = useState("");
   const [addingVehicle, setAddingVehicle] = useState(false);
+  const [vehicleFormOpen, setVehicleFormOpen] = useState(false);
 
   // Présélection de l'entreprise quand le wizard est ouvert via un QR code.
   useEffect(() => {
@@ -137,6 +138,7 @@ export function NewDepotWizard({
       setVehicleId(id);
       setNewVehicleLabel("");
       setNewVehiclePlate("");
+      setVehicleFormOpen(false);
     } finally {
       setAddingVehicle(false);
     }
@@ -281,18 +283,34 @@ export function NewDepotWizard({
                 }))}
                 placeholder="— Sélectionner un véhicule —"
               />
-              <div className="mt-2 flex flex-col gap-2 rounded-lg border border-dashed border-[var(--border)] p-3 sm:flex-row sm:items-end">
-                <div className="flex-1">
-                  <label className="mb-1 block text-xs font-medium text-[var(--muted-foreground)]">Ajouter un véhicule</label>
-                  <Input value={newVehicleLabel} onChange={(e) => setNewVehicleLabel(e.target.value)} placeholder="Ex. Benne 20 m³" />
+              {vehicleFormOpen ? (
+                <div className="mt-2 flex flex-col gap-2 rounded-lg border border-dashed border-[var(--border)] p-3 sm:flex-row sm:items-end">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted-foreground)]">Nouveau véhicule</label>
+                    <Input value={newVehicleLabel} onChange={(e) => setNewVehicleLabel(e.target.value)} placeholder="Ex. Benne 20 m³" autoFocus />
+                  </div>
+                  <div className="sm:w-40">
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted-foreground)]">Immatriculation</label>
+                    <Input value={newVehiclePlate} onChange={(e) => setNewVehiclePlate(e.target.value)} placeholder="AB-123-CD" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="secondary" onClick={handleAddVehicle} disabled={!newVehicleLabel.trim() || addingVehicle}>
+                      {addingVehicle ? <Spinner className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Ajouter
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setVehicleFormOpen(false)} disabled={addingVehicle}>
+                      Annuler
+                    </Button>
+                  </div>
                 </div>
-                <div className="sm:w-40">
-                  <Input value={newVehiclePlate} onChange={(e) => setNewVehiclePlate(e.target.value)} placeholder="AB-123-CD" />
-                </div>
-                <Button type="button" variant="secondary" onClick={handleAddVehicle} disabled={!newVehicleLabel.trim() || addingVehicle}>
-                  {addingVehicle ? <Spinner className="h-4 w-4" /> : <Plus className="h-4 w-4" />} Ajouter
-                </Button>
-              </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setVehicleFormOpen(true)}
+                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline"
+                >
+                  <Plus className="h-4 w-4" /> Le véhicule n'est pas dans la liste ? Ajoutez-le
+                </button>
+              )}
             </Field>
           ) : null}
 
