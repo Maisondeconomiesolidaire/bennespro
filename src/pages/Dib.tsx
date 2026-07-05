@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import {
   BadgeCheck,
@@ -13,6 +13,7 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { DIB_MATERIAL, type DepotItem } from "../lib/materials";
+import { generateBonDepotPdfBase64 } from "../lib/bonDepotPdf";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Field";
@@ -43,6 +44,7 @@ export function Dib() {
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const billDepot = useMutation(api.bennespro.billDepot);
   const sendInvoiceEmail = useAction(api.bennespro.sendInvoiceEmail);
+  const convex = useConvex();
 
   const [selected, setSelected] = useState<Id<"bpDepots"> | null>(null);
   const [editingPrice, setEditingPrice] = useState(false);
@@ -82,8 +84,28 @@ export function Dib() {
     setEmailInfo(null);
     setBillError(null);
     try {
-      const { sentTo } = await sendInvoiceEmail({ depotId });
-      setEmailInfo(`Facture envoyée par email à ${sentTo}.`);
+      // Le bon de dépôt PDF est généré ici (jsPDF) et joint à l'email.
+      let bonPdfBase64: string | undefined;
+      try {
+        const depot = await convex.query(api.bennespro.getDepot, { depotId });
+        if (depot) {
+          bonPdfBase64 = await generateBonDepotPdfBase64({
+            depotNumber: depot.depotNumber,
+            createdAt: depot.createdAt,
+            depositorName: depot.depositorName,
+            siteRef: depot.siteRef,
+            items: depot.items,
+            comment: depot.comment,
+            company: depot.company,
+            vehicle: depot.vehicle,
+            signatureUrl: depot.signatureUrl,
+          });
+        }
+      } catch {
+        // Bon indisponible : l'email part quand même avec la facture.
+      }
+      const { sentTo } = await sendInvoiceEmail({ depotId, bonPdfBase64 });
+      setEmailInfo(`Facture envoyée par email à ${sentTo} (facture + bon de dépôt en PDF).`);
     } catch (err) {
       setBillError(err instanceof Error ? err.message : "Échec de l'envoi de l'email.");
     } finally {
@@ -274,7 +296,7 @@ export function Dib() {
                                 }}
                               >
                                 {emailingId === d._id ? <Spinner className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
-                                Envoyer
+                                Envoyer la facture
                               </Button>
                             </>
                           ) : null}

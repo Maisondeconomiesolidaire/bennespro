@@ -51,7 +51,7 @@ export function CompanyModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Entreprise fraîchement créée : on affiche son QR code généré automatiquement. */
-  const [created, setCreated] = useState<{ _id: Id<"bpCompanies">; name: string } | null>(null);
+  const [created, setCreated] = useState<{ _id: Id<"bpCompanies">; name: string; siret?: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -93,7 +93,7 @@ export function CompanyModal({
         const id = await createCompany(payload);
         onCreated?.(id);
         // QR code généré automatiquement pour la nouvelle entreprise.
-        setCreated({ _id: id, name: payload.name });
+        setCreated({ _id: id, name: payload.name, siret: payload.siret });
       }
       onClose();
     } catch (err) {

@@ -11,7 +11,7 @@ export const LABEL_W = 62;
 export const LABEL_H = 29;
 
 export async function generateCompanyLabelPdf(
-  company: Pick<Doc<"bpCompanies">, "_id" | "name">,
+  company: Pick<Doc<"bpCompanies">, "_id" | "name"> & { siret?: string },
 ): Promise<void> {
   const doc = new jsPDF({ unit: "mm", format: [LABEL_W, LABEL_H], orientation: "landscape" });
 
@@ -21,7 +21,7 @@ export async function generateCompanyLabelPdf(
   const qrSize = LABEL_H - 4;
   doc.addImage(qr, "PNG", 2, 2, qrSize, qrSize);
 
-  // Nom de l'entreprise à droite du QR.
+  // À droite du QR : nom de l'entreprise + SIRET.
   const textX = qrSize + 5;
   const textW = LABEL_W - textX - 2;
   doc.setFont("helvetica", "bold");
@@ -32,13 +32,14 @@ export async function generateCompanyLabelPdf(
     nameLines = nameLines.slice(0, 3);
     nameLines[2] = nameLines[2].replace(/.{2}$/, "…");
   }
-  doc.text(nameLines, textX, 8);
+  doc.text(nameLines, textX, 9);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  doc.setTextColor(90, 90, 90);
-  doc.text("Scannez pour un", textX, 22);
-  doc.text("nouveau dépôt", textX, 25);
+  if (company.siret) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(80, 80, 80);
+    doc.text(`SIRET ${company.siret}`, textX, 9 + nameLines.length * 4.6 + 2.5);
+  }
 
   const slug = company.name
     .normalize("NFD")

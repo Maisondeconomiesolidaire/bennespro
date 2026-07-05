@@ -56,6 +56,18 @@ const MUTED = { r: 110, g: 120, b: 114 };
 
 /** Génère et télécharge le bon de dépôt PDF (A4). */
 export async function generateBonDepotPdf(data: BonDepotData): Promise<void> {
+  const doc = await buildBonDepotDoc(data);
+  doc.save(`bon-depot-${String(data.depotNumber).padStart(4, "0")}.pdf`);
+}
+
+/** Génère le bon de dépôt et le renvoie en base64 (pièce jointe email). */
+export async function generateBonDepotPdfBase64(data: BonDepotData): Promise<string> {
+  const doc = await buildBonDepotDoc(data);
+  return doc.output("datauristring").split(",")[1];
+}
+
+/** Construit le document jsPDF du bon de dépôt (A4). */
+async function buildBonDepotDoc(data: BonDepotData): Promise<jsPDF> {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -242,5 +254,5 @@ export async function generateBonDepotPdf(data: BonDepotData): Promise<void> {
     }
   }
 
-  doc.save(`bon-depot-${String(data.depotNumber).padStart(4, "0")}.pdf`);
+  return doc;
 }

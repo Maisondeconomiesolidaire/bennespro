@@ -17,7 +17,7 @@ export function Entreprises() {
   const companies = useQuery(api.bennespro.listCompanies);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Id<"bpCompanies"> | null>(null);
-  const [qrCompany, setQrCompany] = useState<Pick<Doc<"bpCompanies">, "_id" | "name"> | null>(null);
+  const [qrCompany, setQrCompany] = useState<(Pick<Doc<"bpCompanies">, "_id" | "name"> & { siret?: string }) | null>(null);
 
   const filtered = (companies ?? []).filter((c) =>
     c.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -71,7 +71,7 @@ export function Entreprises() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setQrCompany({ _id: c._id, name: c.name });
+                  setQrCompany({ _id: c._id, name: c.name, siret: c.siret });
                 }}
                 title="QR code de l'entreprise (étiquette Brother QL-500)"
                 aria-label="QR code de l'entreprise"
@@ -107,7 +107,7 @@ function CompanyDetailModal({
   companyId: Id<"bpCompanies"> | null;
   onClose: () => void;
   onEdit: (id: Id<"bpCompanies">) => void;
-  onShowQr: (company: Pick<Doc<"bpCompanies">, "_id" | "name">) => void;
+  onShowQr: (company: Pick<Doc<"bpCompanies">, "_id" | "name"> & { siret?: string }) => void;
 }) {
   const company = useQuery(api.bennespro.getCompany, companyId ? { companyId } : "skip");
   const addVehicle = useMutation(api.bennespro.addVehicle);
@@ -164,7 +164,7 @@ function CompanyDetailModal({
               <Button variant="secondary" size="sm" onClick={() => onEdit(company._id)}>
                 <Pencil className="h-4 w-4" /> Modifier
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => onShowQr({ _id: company._id, name: company.name })}>
+              <Button variant="secondary" size="sm" onClick={() => onShowQr({ _id: company._id, name: company.name, siret: company.siret })}>
                 <QrCode className="h-4 w-4" /> QR code
               </Button>
             </div>

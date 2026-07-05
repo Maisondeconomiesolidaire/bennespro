@@ -7,7 +7,7 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
 
-type Company = Pick<Doc<"bpCompanies">, "_id" | "name">;
+type Company = Pick<Doc<"bpCompanies">, "_id" | "name"> & { siret?: string };
 
 /**
  * QR code d'une entreprise : scanné, il ouvre directement un nouveau dépôt
@@ -77,9 +77,9 @@ export function CompanyQrModal({
             )}
             <div className="min-w-0 text-left">
               <p className="break-words text-sm font-bold leading-snug text-neutral-900">{company.name}</p>
-              <p className="mt-1 text-[11px] leading-tight text-neutral-500">
-                Scannez pour un<br />nouveau dépôt
-              </p>
+              {company.siret ? (
+                <p className="mt-1 text-[11px] leading-tight text-neutral-500">SIRET {company.siret}</p>
+              ) : null}
             </div>
           </div>
           <p className="mt-2 text-xs text-[var(--muted-foreground)]">
