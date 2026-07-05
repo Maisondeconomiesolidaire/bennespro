@@ -9,6 +9,7 @@ import {
   Pencil,
   Receipt,
   Recycle,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -44,6 +45,7 @@ export function Dib() {
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const billDepot = useMutation(api.bennespro.billDepot);
   const sendInvoiceEmail = useAction(api.bennespro.sendInvoiceEmail);
+  const refreshInvoiceStatus = useAction(api.bennespro.refreshInvoiceStatus);
   const convex = useConvex();
 
   const [selected, setSelected] = useState<Id<"bpDepots"> | null>(null);
@@ -54,6 +56,7 @@ export function Dib() {
   const [billingId, setBillingId] = useState<Id<"bpDepots"> | null>(null);
   const [billError, setBillError] = useState<string | null>(null);
   const [emailingId, setEmailingId] = useState<Id<"bpDepots"> | null>(null);
+  const [refreshingId, setRefreshingId] = useState<Id<"bpDepots"> | null>(null);
   const [emailInfo, setEmailInfo] = useState<string | null>(null);
 
   const dibDepots = useMemo(
@@ -79,7 +82,7 @@ export function Dib() {
     }
   }
 
-  async function handleSendEmail(depotId: Id<"bpDepots">) {
+  async function handleSendEmail(depotId: Id<"bpDepots">, reminder = false) {
     setEmailingId(depotId);
     setEmailInfo(null);
     setBillError(null);
@@ -104,8 +107,10 @@ export function Dib() {
       } catch {
         // Bon indisponible : l'email part quand même avec la facture.
       }
-      const { sentTo } = await sendInvoiceEmail({ depotId, bonPdfBase64 });
-      setEmailInfo(`Facture envoyée par email à ${sentTo} (facture + bon de dépôt en PDF).`);
+      const { sentTo } = await sendInvoiceEmail({ depotId, bonPdfBase64, reminder });
+      setEmailInfo(
+        `${reminder ? "Relance envoyée" : "Facture envoyée"} par email à ${sentTo} (facture + bon de dépôt en PDF).`,
+      );
     } catch (err) {
       setBillError(err instanceof Error ? err.message : "Échec de l'envoi de l'email.");
     } finally {
@@ -122,6 +127,18 @@ export function Dib() {
       setBillError(err instanceof Error ? err.message : "Échec de la facturation.");
     } finally {
       setBillingId(null);
+    }
+  }
+
+  async function handleRefreshStatus(depotId: Id<"bpDepots">) {
+    setRefreshingId(depotId);
+    setBillError(null);
+    try {
+      await refreshInvoiceStatus({ depotId });
+    } catch (err) {
+      setBillError(err instanceof Error ? err.message : "Échec de l'actualisation Stripe.");
+    } finally {
+      setRefreshingId(null);
     }
   }
 
@@ -159,7 +176,7 @@ export function Dib() {
               ) : (
                 <p className="text-2xl font-bold tracking-tight text-[var(--foreground)]">
                   {EUR.format(priceEuros ?? 0)}
-                  <span className="text-sm font-semibold text-[var(--muted-foreground)]"> / kg</span>
+                  <span className="text-sm font-semibold text-[var(--muted-foreground)]"> HT / kg</span>
                 </p>
               )}
             </div>
@@ -203,7 +220,8 @@ export function Dib() {
         {priceError ? <p className="mt-2 text-sm text-red-600">{priceError}</p> : null}
         <p className="mt-3 text-xs leading-5 text-[var(--muted-foreground)]">
           Le nouveau prix s'applique aux prochains dépôts (et aux re-facturations). Les lignes DIB en m³ ou à
-          l'unité ne sont pas facturables : seuls les poids (kg, tonne) le sont.
+          l'unité ne sont pas facturables : seuls les poids (kg, tonne) le sont. La TVA de 20% est ajoutée sur la
+          facture Stripe.
         </p>
       </div>
 
@@ -244,8 +262,12 @@ export function Dib() {
                 const amountCents =
                   d.billing?.amountCents ??
                   (settings ? Math.round(weight * settings.priceCentsPerKg) : null);
+                const vatRate = d.billing?.vatRate ?? 20;
+                const amountTtcCents = amountCents !== null ? Math.round(amountCents * (1 + vatRate / 100)) : null;
                 const canBill =
                   weight > 0 && (!d.billing || d.billing.status === "error");
+                const canSendReminder =
+                  Boolean(d.billing?.stripeInvoiceUrl) && d.billing?.paymentStatus !== "paid";
                 return (
                   <tr
                     key={d._id}
@@ -263,12 +285,25 @@ export function Dib() {
                       {weight > 0 ? `${KG.format(weight)} kg` : <span className="text-xs text-[var(--muted-foreground)]">non pesé</span>}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-[var(--foreground)]">
-                      {amountCents !== null && weight > 0 ? EUR.format(amountCents / 100) : "—"}
+                      {amountCents !== null && amountTtcCents !== null && weight > 0 ? (
+                        <span className="inline-flex flex-col items-end leading-tight">
+                          <span>{EUR.format(amountTtcCents / 100)} TTC</span>
+                          <span className="text-xs font-medium text-[var(--muted-foreground)]">
+                            {EUR.format(amountCents / 100)} HT
+                          </span>
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {d.billing ? (
                         <div className="flex items-center gap-2">
-                          <BillingBadge status={d.billing.status} />
+                          <BillingBadge
+                            status={d.billing.status}
+                            paymentStatus={d.billing.paymentStatus}
+                            vatRate={d.billing.vatRate}
+                          />
                           {d.billing.status === "error" && d.billing.error ? (
                             <span className="max-w-[220px] truncate text-xs text-red-600" title={d.billing.error}>
                               {d.billing.error}
@@ -288,16 +323,39 @@ export function Dib() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                disabled={emailingId === d._id}
-                                title="Envoyer le lien de la facture par email à l'entreprise"
+                                disabled={refreshingId === d._id}
+                                title="Actualiser le statut depuis Stripe"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  void handleSendEmail(d._id);
+                                  void handleRefreshStatus(d._id);
                                 }}
                               >
-                                {emailingId === d._id ? <Spinner className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
-                                Envoyer la facture
+                                {refreshingId === d._id ? (
+                                  <Spinner className="h-4 w-4" />
+                                ) : (
+                                  <RefreshCw className="h-4 w-4" />
+                                )}
+                                Actualiser
                               </Button>
+                              {canSendReminder ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={emailingId === d._id}
+                                  title="Envoyer une relance de règlement par email à l'entreprise"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleSendEmail(d._id, true);
+                                  }}
+                                >
+                                  {emailingId === d._id ? (
+                                    <Spinner className="h-4 w-4" />
+                                  ) : (
+                                    <Mail className="h-4 w-4" />
+                                  )}
+                                  Relancer
+                                </Button>
+                              ) : null}
                             </>
                           ) : null}
                         </div>

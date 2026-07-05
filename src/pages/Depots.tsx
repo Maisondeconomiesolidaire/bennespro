@@ -144,7 +144,12 @@ export function Depots() {
                     <td className="px-4 py-3">
                       {hasDib ? (
                         d.billing ? (
-                          <BillingBadge status={d.billing.status} amountCents={d.billing.amountCents} />
+                          <BillingBadge
+                            status={d.billing.status}
+                            paymentStatus={d.billing.paymentStatus}
+                            amountCents={d.billing.amountCents}
+                            vatRate={d.billing.vatRate}
+                          />
                         ) : (
                           <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
                             Non facturé
@@ -172,22 +177,44 @@ export function Depots() {
 
 export function BillingBadge({
   status,
+  paymentStatus,
   amountCents,
+  vatRate,
 }: {
   status: "pending" | "invoiced" | "error";
+  paymentStatus?: "draft" | "open" | "paid" | "void" | "uncollectible";
   amountCents?: number;
+  vatRate?: number;
 }) {
-  const amount = amountCents !== undefined ? ` · ${EUR.format(amountCents / 100)}` : "";
+  const amount =
+    amountCents !== undefined
+      ? ` · ${EUR.format((amountCents * (1 + (vatRate ?? 20) / 100)) / 100)} TTC`
+      : "";
+  const label =
+    status === "error"
+      ? "Erreur"
+      : status === "pending"
+        ? "En cours"
+        : paymentStatus === "paid"
+          ? "Payée"
+          : paymentStatus === "void"
+            ? "Annulée"
+            : paymentStatus === "uncollectible"
+              ? "Irrécouvrable"
+              : paymentStatus === "draft"
+                ? "Brouillon"
+                : "En attente de règlement";
   return (
     <span
       className={cn(
         "inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold",
-        status === "invoiced" && "bg-brand-100 text-brand-700",
+        status === "invoiced" && paymentStatus === "paid" && "bg-brand-100 text-brand-700",
+        status === "invoiced" && paymentStatus !== "paid" && "bg-amber-100 text-amber-700",
         status === "pending" && "bg-amber-100 text-amber-700",
         status === "error" && "bg-red-100 text-red-700",
       )}
     >
-      {status === "invoiced" ? "Facturé" : status === "pending" ? "En cours" : "Erreur"}
+      {label}
       {amount}
     </span>
   );

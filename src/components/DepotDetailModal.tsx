@@ -12,6 +12,8 @@ import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
 import { FullSpinner } from "./ui/Spinner";
 
+const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+
 export function DepotDetailModal({
   depotId,
   onClose,
@@ -76,7 +78,21 @@ export function DepotDetailModal({
                 <div className="sm:col-span-2">
                   <p className="text-xs text-[var(--muted-foreground)]">Facturation DIB ({depot.billing.weightKg} kg)</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <BillingBadge status={depot.billing.status} amountCents={depot.billing.amountCents} />
+                    <BillingBadge
+                      status={depot.billing.status}
+                      paymentStatus={depot.billing.paymentStatus}
+                      amountCents={depot.billing.amountCents}
+                      vatRate={depot.billing.vatRate}
+                    />
+                    <span className="text-xs font-medium text-[var(--muted-foreground)]">
+                      {EUR.format(depot.billing.amountCents / 100)} HT ·{" "}
+                      {EUR.format((depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100)) / 100)} TTC
+                    </span>
+                    {depot.billing.paidAt ? (
+                      <span className="text-xs text-[var(--muted-foreground)]">
+                        Payée le {new Date(depot.billing.paidAt).toLocaleDateString("fr-FR")}
+                      </span>
+                    ) : null}
                     {depot.billing.stripeInvoiceUrl ? (
                       <a
                         href={depot.billing.stripeInvoiceUrl}
