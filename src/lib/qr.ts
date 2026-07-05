@@ -6,7 +6,8 @@ import type { Id } from "../../convex/_generated/dataModel";
  * un nouveau dépôt avec l'entreprise présélectionnée.
  */
 export function companyDepotUrl(companyId: Id<"bpCompanies">): string {
-  return `${window.location.origin}/?entreprise=${companyId}`;
+  const appUrl = import.meta.env.VITE_BENNESPRO_URL || window.location.origin;
+  return `${appUrl.replace(/\/$/, "")}/?entreprise=${companyId}`;
 }
 
 /** Génère un QR code en data URL PNG (haute résolution pour l'impression). */

@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_CLERK_PUBLISHABLE_KEY: string;
   readonly VITE_CONVEX_SITE_URL?: string;
   readonly VITE_RECYCAPP_URL?: string;
+  readonly VITE_BENNESPRO_URL?: string;
 }
 
 interface ImportMeta {
