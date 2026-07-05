@@ -133,7 +133,7 @@ export function DepotDetailModal({
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {photos.map((p, i) => (
                   <a key={i} href={p.url ?? undefined} target="_blank" rel="noreferrer" className="block">
-                    <img src={p.url ?? undefined} alt={p.label} className="aspect-square w-full rounded-lg border border-[var(--border)] object-cover" />
+                    <img src={p.url ?? undefined} alt={p.label} loading="lazy" decoding="async" className="aspect-square w-full rounded-lg border border-[var(--border)] object-cover" />
                     <span className="mt-1 block text-center text-xs text-[var(--muted-foreground)]">{p.label}</span>
                   </a>
                 ))}

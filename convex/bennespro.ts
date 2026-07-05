@@ -206,8 +206,13 @@ export const createDepot = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "bennespro:depots", "create");
     const identity = await requireUser(ctx);
-    const all = await ctx.db.query("bpDepots").collect();
-    const depotNumber = all.length + 1;
+    // Dernier numéro via l'index (évite de charger toute la table).
+    const last = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_number")
+      .order("desc")
+      .first();
+    const depotNumber = (last?.depotNumber ?? 0) + 1;
 
     // Seul le DIB est facturé, au poids (kg / tonne), au tarif courant.
     const weightKg = dibWeightKg(args.items);
