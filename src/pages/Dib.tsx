@@ -1,0 +1,312 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { useNavigate } from "react-router-dom";
+import {
+  BadgeCheck,
+  BadgeEuro,
+  ExternalLink,
+  Pencil,
+  Receipt,
+  Recycle,
+  TriangleAlert,
+} from "lucide-react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
+import { DIB_MATERIAL, type DepotItem } from "../lib/materials";
+import { UnderlineTabs } from "../components/ui/UnderlineTabs";
+import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Field";
+import { EmptyState } from "../components/ui/EmptyState";
+import { FullSpinner, Spinner } from "../components/ui/Spinner";
+import { DepotDetailModal } from "../components/DepotDetailModal";
+import { BillingBadge } from "./Depots";
+
+const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+const KG = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+/** Poids DIB affichable côté client (kg + tonnes ; m³/unités non facturables). */
+function dibWeightKg(items: DepotItem[]): number {
+  let kg = 0;
+  for (const it of items) {
+    if (it.material !== DIB_MATERIAL) continue;
+    if (it.unit === "kg") kg += it.quantity;
+    else if (it.unit === "tonne") kg += it.quantity * 1000;
+  }
+  return Math.round(kg * 100) / 100;
+}
+
+/** Registre DIB : prix au kg, dépôts concernés et facturation Stripe. */
+export function Dib() {
+  const navigate = useNavigate();
+  const depots = useQuery(api.bennespro.listDepots);
+  const settings = useQuery(api.bennespro.getDibSettings);
+  const setDibPrice = useMutation(api.bennespro.setDibPrice);
+  const billDepot = useMutation(api.bennespro.billDepot);
+
+  const [selected, setSelected] = useState<Id<"bpDepots"> | null>(null);
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [priceInput, setPriceInput] = useState("");
+  const [savingPrice, setSavingPrice] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [billingId, setBillingId] = useState<Id<"bpDepots"> | null>(null);
+  const [billError, setBillError] = useState<string | null>(null);
+
+  const dibDepots = useMemo(
+    () => (depots ?? []).filter((d) => d.items.some((it) => it.material === DIB_MATERIAL)),
+    [depots],
+  );
+
+  const totals = useMemo(() => {
+    let weightKg = 0;
+    let invoicedCents = 0;
+    for (const d of dibDepots) {
+      weightKg += d.billing?.weightKg ?? dibWeightKg(d.items);
+      if (d.billing?.status === "invoiced") invoicedCents += d.billing.amountCents;
+    }
+    return { weightKg, invoicedCents };
+  }, [dibDepots]);
+
+  async function handleSavePrice() {
+    const parsed = Number(priceInput.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setPriceError("Saisissez un prix en euros par kg, ex. 0,34.");
+      return;
+    }
+    setSavingPrice(true);
+    setPriceError(null);
+    try {
+      await setDibPrice({ priceCentsPerKg: Math.round(parsed * 10000) / 100 });
+      setEditingPrice(false);
+    } catch (err) {
+      setPriceError(err instanceof Error ? err.message : "Échec de l'enregistrement du prix.");
+    } finally {
+      setSavingPrice(false);
+    }
+  }
+
+  async function handleBill(depotId: Id<"bpDepots">) {
+    setBillingId(depotId);
+    setBillError(null);
+    try {
+      await billDepot({ depotId });
+    } catch (err) {
+      setBillError(err instanceof Error ? err.message : "Échec de la facturation.");
+    } finally {
+      setBillingId(null);
+    }
+  }
+
+  const priceEuros = settings ? settings.priceCentsPerKg / 100 : null;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">DIB & facturation</h1>
+        <p className="text-sm text-[var(--muted-foreground)]">
+          Seul le tout-venant / DIB non triés est facturé, au poids. Les factures sont émises via Stripe.
+        </p>
+      </div>
+
+      <UnderlineTabs
+        items={[
+          { key: "all", label: "Tous les dépôts" },
+          { key: "dib", label: "DIB & facturation", icon: Recycle },
+        ]}
+        value="dib"
+        onChange={(key) => navigate(key === "dib" ? "/dib" : "/")}
+      />
+
+      {/* ── Prix du DIB + état Stripe ─────────────────────────────────────── */}
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="glass-card rounded-xl border border-[var(--border)] p-5 lg:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-100 text-brand-600">
+                <BadgeEuro className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-[var(--muted-foreground)]">Prix du DIB</p>
+                {settings === undefined ? (
+                  <Spinner className="mt-1 h-4 w-4" />
+                ) : (
+                  <p className="text-2xl font-bold tracking-tight text-[var(--foreground)]">
+                    {EUR.format(priceEuros ?? 0)}
+                    <span className="text-sm font-semibold text-[var(--muted-foreground)]"> / kg</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {editingPrice ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Input
+                    value={priceInput}
+                    onChange={(e) => setPriceInput(e.target.value)}
+                    placeholder="0,34"
+                    inputMode="decimal"
+                    className="h-10 w-28 pr-12 text-right font-semibold"
+                    autoFocus
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-[var(--muted-foreground)]">
+                    €/kg
+                  </span>
+                </div>
+                <Button size="sm" onClick={handleSavePrice} disabled={savingPrice}>
+                  {savingPrice ? <Spinner className="h-4 w-4" /> : <BadgeCheck className="h-4 w-4" />} Enregistrer
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditingPrice(false)} disabled={savingPrice}>
+                  Annuler
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setPriceInput(priceEuros !== null ? String(priceEuros).replace(".", ",") : "0,34");
+                  setEditingPrice(true);
+                }}
+                disabled={settings === undefined}
+              >
+                <Pencil className="h-4 w-4" /> Modifier le prix
+              </Button>
+            )}
+          </div>
+          {priceError ? <p className="mt-2 text-sm text-red-600">{priceError}</p> : null}
+          <p className="mt-3 text-xs leading-5 text-[var(--muted-foreground)]">
+            Le nouveau prix s'applique aux prochains dépôts (et aux re-facturations). Les lignes DIB en m³ ou à
+            l'unité ne sont pas facturables : seuls les poids (kg, tonne) le sont.
+          </p>
+        </div>
+
+        <div className="glass-card rounded-xl border border-[var(--border)] p-5">
+          <p className="text-sm font-medium text-[var(--muted-foreground)]">Stripe</p>
+          {settings === undefined ? (
+            <Spinner className="mt-2 h-4 w-4" />
+          ) : settings.stripeConfigured ? (
+            <p className="mt-1 flex items-center gap-2 text-sm font-semibold text-brand-600">
+              <BadgeCheck className="h-4 w-4" /> Connecté — facturation automatique active
+            </p>
+          ) : (
+            <p className="mt-1 flex items-center gap-2 text-sm font-semibold text-amber-600">
+              <TriangleAlert className="h-4 w-4" /> Clé Stripe non configurée
+            </p>
+          )}
+          <div className="mt-3 space-y-1 text-sm text-[var(--muted-foreground)]">
+            <p>
+              Poids DIB total : <strong className="text-[var(--foreground)]">{KG.format(totals.weightKg)} kg</strong>
+            </p>
+            <p>
+              Facturé : <strong className="text-[var(--foreground)]">{EUR.format(totals.invoicedCents / 100)}</strong>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {billError ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{billError}</p>
+      ) : null}
+
+      {/* ── Dépôts contenant du DIB ───────────────────────────────────────── */}
+      {depots === undefined ? (
+        <FullSpinner />
+      ) : dibDepots.length === 0 ? (
+        <EmptyState
+          icon={<Recycle className="h-8 w-8" />}
+          title="Aucun dépôt DIB"
+          description="Aucun dépôt ne contient de tout-venant / DIB non triés pour l'instant."
+        />
+      ) : (
+        <div className="glass-card overflow-x-auto rounded-xl border border-[var(--border)]">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
+              <tr>
+                <th className="px-4 py-3 font-semibold">N°</th>
+                <th className="px-4 py-3 font-semibold">Entreprise</th>
+                <th className="px-4 py-3 font-semibold">Date</th>
+                <th className="px-4 py-3 text-right font-semibold">Poids DIB</th>
+                <th className="px-4 py-3 text-right font-semibold">Montant</th>
+                <th className="px-4 py-3 font-semibold">Facturation</th>
+                <th className="px-4 py-3 font-semibold"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {dibDepots.map((d) => {
+                const weight = d.billing?.weightKg ?? dibWeightKg(d.items);
+                const amountCents =
+                  d.billing?.amountCents ??
+                  (settings ? Math.round(weight * settings.priceCentsPerKg) : null);
+                const canBill =
+                  weight > 0 && (!d.billing || d.billing.status === "error");
+                return (
+                  <tr
+                    key={d._id}
+                    onClick={() => setSelected(d._id)}
+                    className="data-row cursor-pointer border-t border-[var(--border)]"
+                  >
+                    <td className="px-4 py-3 font-semibold text-[var(--foreground)]">
+                      {String(d.depotNumber).padStart(4, "0")}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-[var(--foreground)]">{d.companyName}</td>
+                    <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                      {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                    </td>
+                    <td className="px-4 py-3 text-right text-[var(--foreground)]">
+                      {weight > 0 ? `${KG.format(weight)} kg` : <span className="text-xs text-[var(--muted-foreground)]">non pesé</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-[var(--foreground)]">
+                      {amountCents !== null && weight > 0 ? EUR.format(amountCents / 100) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {d.billing ? (
+                        <div className="flex items-center gap-2">
+                          <BillingBadge status={d.billing.status} />
+                          {d.billing.status === "error" && d.billing.error ? (
+                            <span className="max-w-[220px] truncate text-xs text-red-600" title={d.billing.error}>
+                              {d.billing.error}
+                            </span>
+                          ) : null}
+                          {d.billing.stripeInvoiceUrl ? (
+                            <a
+                              href={d.billing.stripeInvoiceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline"
+                            >
+                              Facture <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[var(--muted-foreground)]">Non facturé</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {canBill ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={billingId === d._id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleBill(d._id);
+                          }}
+                        >
+                          {billingId === d._id ? <Spinner className="h-4 w-4" /> : <Receipt className="h-4 w-4" />}
+                          {d.billing?.status === "error" ? "Refacturer" : "Facturer"}
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <DepotDetailModal depotId={selected} onClose={() => setSelected(null)} />
+    </div>
+  );
+}
