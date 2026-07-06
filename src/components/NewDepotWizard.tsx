@@ -208,33 +208,46 @@ export function NewDepotWizard({
 
   return (
     <Modal open={open} onClose={resetAndClose} title="Nouveau dépôt">
-      {/* Fil d'étapes */}
-      <div className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        {STEP_LABELS.map((label, i) => {
-          const n = (i + 1) as Step;
-          const active = n === step;
-          const done = n < step;
-          return (
-            <div key={label} className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
-                  active
-                    ? "bg-brand-500 text-white"
-                    : done
-                      ? "bg-brand-100 text-brand-700"
-                      : "bg-[var(--muted)] text-[var(--muted-foreground)]",
-                )}
-              >
-                {done ? <Check className="h-3.5 w-3.5" /> : n}
-              </span>
-              <span className={cn("font-medium", active ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)]")}>
-                {label}
-              </span>
-              {i < STEP_LABELS.length - 1 ? <span className="mx-1 text-[var(--muted-foreground)]">›</span> : null}
-            </div>
-          );
-        })}
+      {/* Fil d'étapes — pastilles compactes sur mobile, labels complets ≥ sm. */}
+      <div className="mb-5">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {STEP_LABELS.map((label, i) => {
+            const n = (i + 1) as Step;
+            const active = n === step;
+            const done = n < step;
+            return (
+              <div key={label} className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                <span
+                  className={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                    active
+                      ? "bg-brand-500 text-white"
+                      : done
+                        ? "bg-brand-100 text-brand-700"
+                        : "bg-[var(--muted)] text-[var(--muted-foreground)]",
+                  )}
+                >
+                  {done ? <Check className="h-3.5 w-3.5" /> : n}
+                </span>
+                <span
+                  className={cn(
+                    "hidden truncate text-sm font-medium sm:inline",
+                    active ? "text-[var(--foreground)]" : "text-[var(--muted-foreground)]",
+                  )}
+                >
+                  {label}
+                </span>
+                {i < STEP_LABELS.length - 1 ? (
+                  <span className="text-[var(--muted-foreground)] sm:mx-1">›</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        {/* Libellé de l'étape courante (mobile uniquement). */}
+        <p className="mt-2 text-sm font-semibold text-[var(--foreground)] sm:hidden">
+          Étape {step}/{STEP_LABELS.length} · {STEP_LABELS[step - 1]}
+        </p>
       </div>
 
       {/* ── Étape 1 : Entreprise & véhicule ───────────────────────────────── */}
@@ -524,8 +537,8 @@ function RecapBlock({
         <RecapLine label="Déposant" value={depositorName} />
         <RecapLine label="Réf. chantier" value={siteRef} />
       </div>
-      <div className="mt-4 overflow-hidden rounded-lg border border-[var(--border)]">
-        <table className="w-full text-sm">
+      <div className="mt-4 overflow-x-auto rounded-lg border border-[var(--border)]">
+        <table className="w-full min-w-[380px] text-sm">
           <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
             <tr>
               <th className="px-3 py-2">Matériau</th>

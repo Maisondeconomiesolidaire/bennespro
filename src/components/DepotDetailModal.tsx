@@ -113,8 +113,8 @@ export function DepotDetailModal({
             </Button>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-[var(--border)]">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+            <table className="w-full min-w-[380px] text-sm">
               <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
                 <tr>
                   <th className="px-3 py-2">Matériau</th>
