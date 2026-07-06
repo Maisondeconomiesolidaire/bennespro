@@ -8,6 +8,7 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import App from "./App";
 import { MissingConfig } from "./components/MissingConfig";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ToastProvider } from "./components/ui/Toast";
 import "./index.css";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -39,7 +40,9 @@ if (missing.length > 0) {
         >
           <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
             <BrowserRouter>
-              <App />
+              <ToastProvider>
+                <App />
+              </ToastProvider>
             </BrowserRouter>
           </ConvexProviderWithClerk>
         </ClerkProvider>

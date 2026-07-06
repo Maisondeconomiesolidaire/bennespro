@@ -9,6 +9,7 @@ import { generateBonDepotPdfBase64 } from "../lib/bonDepotPdf";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
 import { BillingBadge } from "./ui/BillingBadge";
+import { useToast } from "./ui/Toast";
 import { DepotDetailModal } from "./DepotDetailModal";
 import { cn } from "../lib/cn";
 
@@ -18,6 +19,17 @@ export type DepotListItem = FunctionReturnType<typeof api.bennespro.listDepots>[
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const KG = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+/** « DD/MM/YY HH:MM » pour l'horodatage de dernière relance. */
+function formatReminder(ts: number): string {
+  return new Date(ts).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /** Poids DIB facturable (kg + tonnes ; m³/unités non facturables). */
 export function dibWeightKg(items: DepotItem[]): number {
@@ -101,24 +113,22 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
   const sendInvoiceEmail = useAction(api.bennespro.sendInvoiceEmail);
   const refreshInvoiceStatus = useAction(api.bennespro.refreshInvoiceStatus);
   const convex = useConvex();
+  const toast = useToast();
 
   const [selected, setSelected] = useState<Id<"bpDepots"> | null>(null);
   const [billingId, setBillingId] = useState<Id<"bpDepots"> | null>(null);
   const [emailingId, setEmailingId] = useState<Id<"bpDepots"> | null>(null);
   const [refreshingId, setRefreshingId] = useState<Id<"bpDepots"> | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const priceCentsPerKg = settings?.priceCentsPerKg ?? null;
 
   async function handleBill(depotId: Id<"bpDepots">) {
     setBillingId(depotId);
-    setError(null);
-    setInfo(null);
     try {
       await billDepot({ depotId });
+      toast.success("Facturation lancée. La facture Stripe est en cours d'émission.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de la facturation.");
+      toast.error(err instanceof Error ? err.message : "Échec de la facturation.");
     } finally {
       setBillingId(null);
     }
@@ -126,11 +136,11 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
 
   async function handleRefresh(depotId: Id<"bpDepots">) {
     setRefreshingId(depotId);
-    setError(null);
     try {
       await refreshInvoiceStatus({ depotId });
+      toast.success("Statut de la facture actualisé.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de l'actualisation Stripe.");
+      toast.error(err instanceof Error ? err.message : "Échec de l'actualisation Stripe.");
     } finally {
       setRefreshingId(null);
     }
@@ -138,8 +148,6 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
 
   async function handleSendEmail(depotId: Id<"bpDepots">, reminder: boolean) {
     setEmailingId(depotId);
-    setError(null);
-    setInfo(null);
     try {
       let bonPdfBase64: string | undefined;
       try {
@@ -161,9 +169,13 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
         // Bon indisponible : l'email part quand même avec la facture.
       }
       const { sentTo } = await sendInvoiceEmail({ depotId, bonPdfBase64, reminder });
-      setInfo(`${reminder ? "Relance envoyée" : "Facture envoyée"} par email à ${sentTo}.`);
+      toast.success(
+        reminder
+          ? `Relance de règlement envoyée à ${sentTo}.`
+          : `Facture envoyée par email à ${sentTo}.`,
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de l'envoi de l'email.");
+      toast.error(err instanceof Error ? err.message : "Échec de l'envoi de l'email.");
     } finally {
       setEmailingId(null);
     }
@@ -246,13 +258,6 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
 
   return (
     <div className="space-y-3">
-      {info ? (
-        <p className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800">{info}</p>
-      ) : null}
-      {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
-      ) : null}
-
       <div className="glass-card overflow-hidden rounded-xl border border-[var(--border)]">
         {/* ── Bureau : tableau ─────────────────────────────────────────────── */}
         <div className="hidden overflow-x-auto md:block">
@@ -303,7 +308,14 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     </td>
                     <td className="px-4 py-3">
                       {d.billing ? (
-                        <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} />
+                        <div className="flex flex-col items-start gap-1">
+                          <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} />
+                          {d.billing.lastReminderAt ? (
+                            <span className="whitespace-nowrap text-[11px] text-[var(--muted-foreground)]">
+                              Dernière relance le {formatReminder(d.billing.lastReminderAt)}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : weight > 0 ? (
                         <span className="inline-flex whitespace-nowrap rounded-full bg-[var(--muted)] px-2.5 py-1 text-xs font-semibold text-[var(--muted-foreground)]">
                           Non facturé
@@ -366,6 +378,11 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     </span>
                   ) : null}
                 </div>
+                {d.billing?.lastReminderAt ? (
+                  <span className="text-[11px] text-[var(--muted-foreground)]">
+                    Dernière relance le {formatReminder(d.billing.lastReminderAt)}
+                  </span>
+                ) : null}
                 {actions(d)}
               </div>
             );
