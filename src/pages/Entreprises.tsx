@@ -12,7 +12,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { Modal } from "../components/ui/Modal";
 import { CompanyQrModal } from "../components/CompanyQrModal";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
-import { BillingBadge } from "./Depots";
+import { BillingBadge } from "../components/ui/BillingBadge";
 import type { Doc } from "../../convex/_generated/dataModel";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
@@ -333,9 +333,10 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
                       <BillingBadge
                         status={depot.billing.status}
                         paymentStatus={depot.billing.paymentStatus}
-                        amountCents={depot.billing.amountCents}
-                        vatRate={depot.billing.vatRate}
                       />
+                      <span className="whitespace-nowrap text-xs text-[var(--muted-foreground)]">
+                        {EUR.format((depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100)) / 100)} TTC
+                      </span>
                       {depot.billing.stripeInvoiceUrl ? (
                         <a
                           href={depot.billing.stripeInvoiceUrl}

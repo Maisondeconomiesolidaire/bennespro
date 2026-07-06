@@ -6,7 +6,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { unitLabel } from "../lib/materials";
 import { generateBonDepotPdf } from "../lib/bonDepotPdf";
 import { ExternalLink } from "lucide-react";
-import { BillingBadge } from "../pages/Depots";
+import { BillingBadge } from "./ui/BillingBadge";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
@@ -81,8 +81,6 @@ export function DepotDetailModal({
                     <BillingBadge
                       status={depot.billing.status}
                       paymentStatus={depot.billing.paymentStatus}
-                      amountCents={depot.billing.amountCents}
-                      vatRate={depot.billing.vatRate}
                     />
                     <span className="text-xs font-medium text-[var(--muted-foreground)]">
                       {EUR.format(depot.billing.amountCents / 100)} HT ·{" "}

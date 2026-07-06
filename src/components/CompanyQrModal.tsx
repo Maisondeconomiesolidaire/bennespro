@@ -82,14 +82,6 @@ export function CompanyQrModal({
               ) : null}
             </div>
           </div>
-          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-            Aperçu de l'étiquette — format 62 × 29 mm, prêt pour Brother QL-500 (rouleau DK 62 mm).
-          </p>
-
-          <p className="mt-4 max-w-sm text-xs leading-5 text-[var(--muted-foreground)]">
-            En scannant ce code (appareil photo ou bouton « Scannez » de l'app), un nouveau dépôt
-            s'ouvre automatiquement avec cette entreprise sélectionnée.
-          </p>
 
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             <Button onClick={handleDownload} disabled={busy || !qrUrl}>

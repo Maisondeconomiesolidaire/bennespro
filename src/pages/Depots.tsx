@@ -1,27 +1,20 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Euro, PackagePlus, Recycle, Scale } from "lucide-react";
+import { PackagePlus, Recycle } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { DIB_MATERIAL } from "../lib/materials";
 import { useAppActions } from "../lib/appActions";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Field";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FullSpinner } from "../components/ui/Spinner";
-import { DepotDetailModal } from "../components/DepotDetailModal";
-import { cn } from "../lib/cn";
-
-const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
-const KG = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+import { DepotsTable, DepotStats } from "../components/DepotsTable";
 
 export function Depots() {
   const navigate = useNavigate();
   const { openNewDepot } = useAppActions();
   const depots = useQuery(api.bennespro.listDepots);
-  const [selected, setSelected] = useState<Id<"bpDepots"> | null>(null);
   const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
@@ -37,26 +30,6 @@ export function Depots() {
     );
   }, [depots, search]);
 
-  const stats = useMemo(() => {
-    const list = depots ?? [];
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    let dibKg = 0;
-    let dibCents = 0;
-    for (const d of list) {
-      if (d.billing) {
-        dibKg += d.billing.weightKg;
-        dibCents += d.billing.amountCents;
-      }
-    }
-    return {
-      total: list.length,
-      thisMonth: list.filter((d) => d.createdAt >= monthStart).length,
-      dibKg,
-      dibCents,
-    };
-  }, [depots]);
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -69,12 +42,7 @@ export function Depots() {
         </Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Recycle} label="Dépôts au total" value={String(stats.total)} />
-        <StatCard icon={CalendarDays} label="Ce mois-ci" value={String(stats.thisMonth)} />
-        <StatCard icon={Scale} label="DIB facturable" value={`${KG.format(stats.dibKg)} kg`} />
-        <StatCard icon={Euro} label="DIB facturé" value={EUR.format(stats.dibCents / 100)} />
-      </div>
+      <DepotStats depots={depots ?? []} countLabel="Dépôts au total" />
 
       <UnderlineTabs
         items={[
@@ -112,132 +80,8 @@ export function Depots() {
           }
         />
       ) : (
-        <div className="glass-card overflow-x-auto rounded-xl border border-[var(--border)]">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
-              <tr>
-                <th className="px-4 py-3 font-semibold">N°</th>
-                <th className="px-4 py-3 font-semibold">Entreprise</th>
-                <th className="px-4 py-3 font-semibold">Déposant</th>
-                <th className="px-4 py-3 font-semibold">Déchets</th>
-                <th className="px-4 py-3 font-semibold">DIB</th>
-                <th className="px-4 py-3 font-semibold">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((d) => {
-                const hasDib = d.items.some((it) => it.material === DIB_MATERIAL);
-                return (
-                  <tr
-                    key={d._id}
-                    onClick={() => setSelected(d._id)}
-                    className="data-row cursor-pointer border-t border-[var(--border)]"
-                  >
-                    <td className="px-4 py-3 font-semibold text-[var(--foreground)]">
-                      {String(d.depotNumber).padStart(4, "0")}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-[var(--foreground)]">{d.companyName}</td>
-                    <td className="px-4 py-3 text-[var(--muted-foreground)]">{d.depositorName}</td>
-                    <td className="px-4 py-3 text-[var(--muted-foreground)]">
-                      {d.items.length} ligne{d.items.length > 1 ? "s" : ""}
-                    </td>
-                    <td className="px-4 py-3">
-                      {hasDib ? (
-                        d.billing ? (
-                          <BillingBadge
-                            status={d.billing.status}
-                            paymentStatus={d.billing.paymentStatus}
-                            amountCents={d.billing.amountCents}
-                            vatRate={d.billing.vatRate}
-                          />
-                        ) : (
-                          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                            Non facturé
-                          </span>
-                        )
-                      ) : (
-                        <span className="text-xs text-[var(--muted-foreground)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted-foreground)]">
-                      {new Date(d.createdAt).toLocaleDateString("fr-FR")}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DepotsTable depots={filtered} />
       )}
-
-      <DepotDetailModal depotId={selected} onClose={() => setSelected(null)} />
-    </div>
-  );
-}
-
-export function BillingBadge({
-  status,
-  paymentStatus,
-  amountCents,
-  vatRate,
-}: {
-  status: "pending" | "invoiced" | "error";
-  paymentStatus?: "draft" | "open" | "paid" | "void" | "uncollectible";
-  amountCents?: number;
-  vatRate?: number;
-}) {
-  const amount =
-    amountCents !== undefined
-      ? ` · ${EUR.format((amountCents * (1 + (vatRate ?? 20) / 100)) / 100)} TTC`
-      : "";
-  const label =
-    status === "error"
-      ? "Erreur"
-      : status === "pending"
-        ? "En cours"
-        : paymentStatus === "paid"
-          ? "Payée"
-          : paymentStatus === "void"
-            ? "Annulée"
-            : paymentStatus === "uncollectible"
-              ? "Irrécouvrable"
-              : paymentStatus === "draft"
-                ? "Brouillon"
-                : "En attente de règlement";
-  return (
-    <span
-      className={cn(
-        "inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold",
-        status === "invoiced" && paymentStatus === "paid" && "bg-brand-100 text-brand-700",
-        status === "invoiced" && paymentStatus !== "paid" && "bg-amber-100 text-amber-700",
-        status === "pending" && "bg-amber-100 text-amber-700",
-        status === "error" && "bg-red-100 text-red-700",
-      )}
-    >
-      {label}
-      {amount}
-    </span>
-  );
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Recycle;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="glass-card flex items-center gap-3 rounded-xl border border-[var(--border)] p-4">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-600">
-        <Icon className="h-5 w-5" />
-      </span>
-      <div className="min-w-0">
-        <p className="truncate text-xs font-medium text-[var(--muted-foreground)]">{label}</p>
-        <p className="truncate text-lg font-bold tracking-tight text-[var(--foreground)]">{value}</p>
-      </div>
     </div>
   );
 }

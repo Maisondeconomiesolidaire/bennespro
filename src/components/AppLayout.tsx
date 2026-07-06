@@ -7,7 +7,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  PackagePlus,
   Recycle,
   Sun,
   Truck,
@@ -142,8 +141,6 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       theme={theme}
       setTheme={setTheme}
       currentPath={location.pathname}
-      onNewDepot={() => setDepotOpen(true)}
-      onNewCompany={() => actions.openCompany()}
       userName={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
       userEmail={user?.primaryEmailAddress?.emailAddress}
       userImage={user?.imageUrl}
@@ -208,8 +205,6 @@ function SidebarContent({
   theme,
   setTheme,
   currentPath,
-  onNewDepot,
-  onNewCompany,
   userName,
   userEmail,
   userImage,
@@ -217,8 +212,6 @@ function SidebarContent({
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   currentPath: string;
-  onNewDepot: () => void;
-  onNewCompany: () => void;
   userName: string;
   userEmail?: string;
   userImage?: string | null;
@@ -229,24 +222,7 @@ function SidebarContent({
         <Link to="/"><BrandLogo /></Link>
       </div>
 
-      <div className="space-y-2 p-3">
-        <button
-          type="button"
-          onClick={onNewDepot}
-          className="flex w-full items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent)]"
-        >
-          <PackagePlus className="h-[18px] w-[18px]" /> Nouveau dépôt
-        </button>
-        <button
-          type="button"
-          onClick={onNewCompany}
-          className="flex w-full items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent)]"
-        >
-          <Building2 className="h-[18px] w-[18px]" /> Nouvelle entreprise
-        </button>
-      </div>
-
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3 pt-0">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = currentPath === item.to || (item.to !== "/" && currentPath.startsWith(item.to));
