@@ -1,16 +1,19 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { Download } from "lucide-react";
+import { useAction, useQuery } from "convex/react";
+import { Download, ExternalLink, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { unitLabel } from "../lib/materials";
 import { generateBonDepotPdf } from "../lib/bonDepotPdf";
-import { ExternalLink } from "lucide-react";
+import { canAccess, PAGE_DEPOTS } from "../lib/permissions";
+import { useAccess } from "./RequirePermission";
 import { BillingBadge } from "./ui/BillingBadge";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
 import { FullSpinner } from "./ui/Spinner";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { useToast } from "./ui/Toast";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 
@@ -22,7 +25,29 @@ export function DepotDetailModal({
   onClose: () => void;
 }) {
   const depot = useQuery(api.bennespro.getDepot, depotId ? { depotId } : "skip");
+  const deleteDepot = useAction(api.bennespro.deleteDepot);
+  const access = useAccess();
+  const toast = useToast();
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const canDelete = canAccess(access, PAGE_DEPOTS, "delete");
+
+  async function handleDelete() {
+    if (!depotId) return;
+    setDeleting(true);
+    try {
+      await deleteDepot({ depotId });
+      toast.success("Dépôt supprimé définitivement.");
+      setConfirmOpen(false);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de la suppression.");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function handlePdf() {
     if (!depot) return;
@@ -161,8 +186,28 @@ export function DepotDetailModal({
               <img src={depot.signatureUrl} alt="Signature" className="h-24 rounded-lg border border-[var(--border)] bg-white object-contain p-2" />
             </div>
           ) : null}
+
+          {canDelete ? (
+            <div className="flex justify-end border-t border-[var(--border)] pt-4">
+              <Button variant="danger" onClick={() => setConfirmOpen(true)}>
+                <Trash2 className="h-4 w-4" /> Supprimer définitivement
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        message={
+          depot
+            ? `Le dépôt n° ${String(depot.depotNumber).padStart(4, "0")} sera supprimé définitivement (photos et bon de dépôt inclus). Sa facture Stripe non réglée sera annulée. Cette action est irréversible.`
+            : ""
+        }
+        busy={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Modal>
   );
 }

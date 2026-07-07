@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { Building2, CalendarDays, Euro, ExternalLink, Info, Pencil, Plus, QrCode, Receipt, Trash2, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -14,6 +14,10 @@ import { CompanyQrModal } from "../components/CompanyQrModal";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { BillingBadge } from "../components/ui/BillingBadge";
 import type { Doc } from "../../convex/_generated/dataModel";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { useAccess } from "../components/RequirePermission";
+import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
+import { useToast } from "../components/ui/Toast";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const QTY = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
@@ -116,14 +120,20 @@ function CompanyDetailModal({
   const addVehicle = useMutation(api.bennespro.addVehicle);
   const updateVehicle = useMutation(api.bennespro.updateVehicle);
   const removeVehicle = useMutation(api.bennespro.removeVehicle);
+  const deleteCompany = useAction(api.bennespro.deleteCompany);
+  const access = useAccess();
+  const toast = useToast();
 
   const [label, setLabel] = useState("");
   const [plate, setPlate] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [editId, setEditId] = useState<Id<"bpVehicles"> | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editPlate, setEditPlate] = useState("");
   const [tab, setTab] = useState<"info" | "vehicles" | "depots">("info");
+  const canDelete = canAccess(access, PAGE_ENTREPRISES, "delete");
 
   async function handleAdd() {
     if (!companyId || !label.trim()) return;
@@ -141,6 +151,21 @@ function CompanyDetailModal({
     if (!editLabel.trim()) return;
     await updateVehicle({ vehicleId, label: editLabel.trim(), plate: editPlate.trim() || undefined });
     setEditId(null);
+  }
+
+  async function handleDelete() {
+    if (!companyId) return;
+    setDeleting(true);
+    try {
+      await deleteCompany({ companyId });
+      toast.success("Entreprise supprimée définitivement.");
+      setConfirmOpen(false);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de la suppression.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -249,8 +274,28 @@ function CompanyDetailModal({
           {tab === "depots" ? (
             <CompanyDepots depots={company.depots} />
           ) : null}
+
+          {canDelete ? (
+            <div className="flex justify-end border-t border-[var(--border)] pt-4">
+              <Button variant="danger" onClick={() => setConfirmOpen(true)}>
+                <Trash2 className="h-4 w-4" /> Supprimer définitivement
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        message={
+          company
+            ? `L'entreprise ${company.name} sera supprimée définitivement, avec ses véhicules, ses dépôts et leurs pièces jointes. Les factures Stripe non réglées seront annulées. Cette action est irréversible.`
+            : ""
+        }
+        busy={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Modal>
   );
 }
