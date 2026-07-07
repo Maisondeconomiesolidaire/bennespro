@@ -11,7 +11,7 @@ import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 export default function App() {
   return (
     <>
-      <UpdateAvailableBanner />
+      <UpdateAvailableBanner appName="Bennes Pro" />
       <Routes>
         <Route element={<AppLayout />}>
           <Route
