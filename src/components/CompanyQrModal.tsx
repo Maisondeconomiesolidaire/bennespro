@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Download, QrCode } from "lucide-react";
+import { Download, Printer, QrCode } from "lucide-react";
 import type { Doc } from "../../convex/_generated/dataModel";
-import { downloadCompanyLabelPng, generateCompanyLabelPngDataUrl } from "../lib/companyLabelPng";
+import { downloadCompanyLabelPng, generateCompanyLabelPngDataUrl, printCompanyLabel } from "../lib/companyLabelPng";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
@@ -49,6 +49,16 @@ export function CompanyQrModal({
     }
   }
 
+  async function handlePrint() {
+    if (!company) return;
+    setBusy(true);
+    try {
+      await printCompanyLabel(company);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Modal
       open={company !== null}
@@ -80,7 +90,11 @@ export function CompanyQrModal({
             )}
           </div>
 
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <div className="mt-5 flex flex-col items-center gap-2">
+            <Button onClick={handlePrint} disabled={busy || !labelUrl}>
+              {busy ? <Spinner className="h-4 w-4" /> : <Printer className="h-4 w-4" />}
+              Imprimer
+            </Button>
             <Button onClick={handleDownload} disabled={busy || !labelUrl}>
               {busy ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
               Étiquette PNG (62 × 29 mm)

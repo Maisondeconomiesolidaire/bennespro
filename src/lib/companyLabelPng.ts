@@ -58,6 +58,58 @@ export async function downloadCompanyLabelPng(company: Company): Promise<void> {
   link.click();
 }
 
+export async function printCompanyLabel(company: Company): Promise<void> {
+  const pngUrl = await generateCompanyLabelPngDataUrl(company);
+  const printWindow = window.open("", "_blank", "width=640,height=420");
+  if (!printWindow) throw new Error("Impossible d'ouvrir la fenêtre d'impression.");
+
+  printWindow.document.write(`<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Étiquette ${escapeHtml(company.name)}</title>
+    <style>
+      @page {
+        size: ${LABEL_W_MM}mm ${LABEL_H_MM}mm;
+        margin: 0;
+      }
+
+      html,
+      body {
+        width: ${LABEL_W_MM}mm;
+        height: ${LABEL_H_MM}mm;
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      img {
+        display: block;
+        width: ${LABEL_W_MM}mm;
+        height: ${LABEL_H_MM}mm;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <img src="${pngUrl}" alt="Étiquette QR ${escapeHtml(company.name)}" />
+    <script>
+      const image = document.querySelector("img");
+      image.addEventListener("load", () => {
+        window.focus();
+        window.print();
+      });
+    </script>
+  </body>
+</html>`);
+  printWindow.document.close();
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -111,4 +163,21 @@ function slugify(value: string): string {
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
 }
