@@ -459,6 +459,14 @@ export default defineSchema(
     address: v.optional(v.string()),
     postalCode: v.optional(v.string()),
     city: v.optional(v.string()),
+    // Migration Clerk dev -> prod : anciens ids Clerk remplacés à la première
+    // reconnexion via l'adresse email.
+    previousClerkIds: v.optional(v.array(v.string())),
+    lastClerkMigrationAt: v.optional(v.number()),
+    // Traçabilité de l'inscription : app (recycapp, mesoutils…) et chemin/
+    // formulaire d'origine (/collecte, /boutique/panier…). Fixé à la création.
+    signupApp: v.optional(v.string()),
+    signupPath: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -478,6 +486,7 @@ export default defineSchema(
     readByStaffAt: v.optional(v.number()),
   })
     .index("by_requestId", ["requestId"])
+    .index("by_senderClerkId", ["senderClerkId"])
     .index("by_createdAt", ["createdAt"]),
 
   notifications: defineTable({
@@ -558,6 +567,7 @@ export default defineSchema(
     // Si le document provient du gestionnaire (partage) : on référence le
     // fichier source sans dupliquer le blob, et on ne le supprime pas au retrait.
     sourceDocumentId: v.optional(v.id("documents")),
+    sharedWithClientAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_requestId", ["requestId"]),
 
@@ -827,13 +837,19 @@ export default defineSchema(
     authorClerkId: v.string(),
     authorName: v.string(),
     authorImageUrl: v.optional(v.string()),
+    title: v.optional(v.string()),
     body: v.string(),
+    externalLink: v.optional(v.string()),
     images: v.array(v.id("_storage")),
     videos: v.optional(v.array(v.id("_storage"))),
     pinned: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
-  }).index("by_createdAt", ["createdAt"]),
+    migrationSourceRef: v.optional(v.string()),
+  })
+    .index("by_authorClerkId", ["authorClerkId"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_migrationSourceRef", ["migrationSourceRef"]),
 
   postComments: defineTable({
     postId: v.id("posts"),
@@ -842,7 +858,9 @@ export default defineSchema(
     authorImageUrl: v.optional(v.string()),
     body: v.string(),
     createdAt: v.number(),
-  }).index("by_postId", ["postId"]),
+  })
+    .index("by_postId", ["postId"])
+    .index("by_authorClerkId", ["authorClerkId"]),
 
   postLikes: defineTable({
     postId: v.id("posts"),
@@ -852,6 +870,7 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_postId", ["postId"])
+    .index("by_clerkId", ["clerkId"])
     .index("by_post_and_user", ["postId", "clerkId"]),
 
   mesoutilsNotifications: defineTable({
@@ -912,10 +931,20 @@ export default defineSchema(
     attendees: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
+    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"))),
     notes: v.optional(v.string()),
     createdAt: v.number(),
+    // Retour (« remarques ») demandé automatiquement après le créneau.
+    feedbackRequestedAt: v.optional(v.number()),
+    feedbackSubmittedAt: v.optional(v.number()),
+    feedbackClean: v.optional(v.boolean()),
+    feedbackTidy: v.optional(v.boolean()),
+    feedbackIssues: v.optional(v.string()),
+    feedbackNotes: v.optional(v.string()),
   })
     .index("by_roomId", ["roomId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_start", ["start"]),
 
   /**
@@ -943,13 +972,24 @@ export default defineSchema(
       v.literal("pending"),
       v.literal("approved"),
       v.literal("rejected"),
+      v.literal("cancelled"),
     ),
     decisionNote: v.optional(v.string()),
     decidedBy: v.optional(v.string()),
     decidedAt: v.optional(v.number()),
+    feedbackRequestedAt: v.optional(v.number()),
+    feedbackSubmittedAt: v.optional(v.number()),
+    feedbackMileage: v.optional(v.number()),
+    feedbackFuelRestored: v.optional(v.boolean()),
+    feedbackVehicleEmpty: v.optional(v.boolean()),
+    feedbackVehicleClean: v.optional(v.boolean()),
+    feedbackIssues: v.optional(v.string()),
+    feedbackNotes: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_vehicleId", ["vehicleId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_status", ["status"])
     .index("by_start", ["start"]),
 
@@ -999,7 +1039,9 @@ export default defineSchema(
     end: v.optional(v.number()),
     images: v.array(v.id("_storage")),
     createdAt: v.number(),
-  }).index("by_start", ["start"]),
+  })
+    .index("by_authorClerkId", ["authorClerkId"])
+    .index("by_start", ["start"]),
 
   /** Espace partage — bons plans internes (prêt, don, vente, échange). */
   dealPosts: defineTable({
@@ -1020,7 +1062,9 @@ export default defineSchema(
     images: v.array(v.id("_storage")),
     status: v.union(v.literal("open"), v.literal("closed")),
     createdAt: v.number(),
-  }).index("by_createdAt", ["createdAt"]),
+  })
+    .index("by_authorClerkId", ["authorClerkId"])
+    .index("by_createdAt", ["createdAt"]),
 
   /** Messagerie interne entre utilisateurs. */
   directMessages: defineTable({
@@ -1320,6 +1364,159 @@ export default defineSchema(
   })
     .index("by_company", ["companyId"])
     .index("by_number", ["depotNumber"]),
+
+  // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
+  // Suivi des salariés et des chantiers : clients, projets, pointages,
+  // fournisseurs, dépenses, factures. Tables préfixées `pt`.
+
+  /** Salariés (avec taux horaire environné). */
+  ptEmployees: defineTable({
+    firstName: v.string(),
+    lastName: v.string(),
+    status: v.union(
+      v.literal("MAD"),
+      v.literal("Compagnon permanent"),
+      v.literal("Compagnon insertion"),
+      v.literal("Renfort ponctuel"),
+      v.literal("Encadrant"),
+    ),
+    /** Taux horaire environné, en euros par heure. */
+    hourlyRate: v.number(),
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_active", ["active"]),
+
+  /** Clients (donneurs d'ordre des chantiers). */
+  ptClients: defineTable({
+    name: v.string(),
+    contactName: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  /** Projets / chantiers rattachés à un client. */
+  ptProjects: defineTable({
+    name: v.string(),
+    clientId: v.id("ptClients"),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+    lat: v.optional(v.number()),
+    lon: v.optional(v.number()),
+    /** Distance aller (km) depuis la base — sert au calcul des déplacements. */
+    distanceKm: v.number(),
+    status: v.union(
+      v.literal("en_cours"),
+      v.literal("termine"),
+      v.literal("en_pause"),
+    ),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_client", ["clientId"])
+    .index("by_status", ["status"]),
+
+  /** Pointages : temps passé par salarié sur un projet + déplacements. */
+  ptTimeEntries: defineTable({
+    projectId: v.id("ptProjects"),
+    /** Dénormalisé depuis le projet au moment du pointage. */
+    clientId: v.id("ptClients"),
+    date: v.number(),
+    lines: v.array(
+      v.object({
+        employeeId: v.id("ptEmployees"),
+        hours: v.number(),
+        /** Snapshot du taux horaire au moment du pointage. */
+        hourlyRate: v.number(),
+        /** hours × hourlyRate. */
+        cost: v.number(),
+      }),
+    ),
+    /** Déplacements : coût = roundTrips × distanceKm × 2 (× 1 €/km). */
+    travel: v.optional(
+      v.object({
+        roundTrips: v.number(),
+        distanceKm: v.number(),
+        cost: v.number(),
+      }),
+    ),
+    laborCost: v.number(),
+    travelCost: v.number(),
+    totalCost: v.number(),
+    notes: v.optional(v.string()),
+    documentIds: v.array(v.id("ptDocuments")),
+    createdAt: v.number(),
+    createdBy: v.optional(v.string()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_date", ["date"]),
+
+  /** Fournisseurs. */
+  ptSuppliers: defineTable({
+    name: v.string(),
+    contactName: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  /** Dépenses (rattachables à un projet et/ou un fournisseur). */
+  ptExpenses: defineTable({
+    label: v.string(),
+    amount: v.number(),
+    date: v.number(),
+    projectId: v.optional(v.id("ptProjects")),
+    supplierId: v.optional(v.id("ptSuppliers")),
+    category: v.optional(v.string()),
+    documentIds: v.array(v.id("ptDocuments")),
+    createdAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_supplier", ["supplierId"]),
+
+  /** Factures — suivi manuel par projet. */
+  ptInvoices: defineTable({
+    projectId: v.id("ptProjects"),
+    clientId: v.id("ptClients"),
+    number: v.string(),
+    amount: v.number(),
+    status: v.union(
+      v.literal("brouillon"),
+      v.literal("envoyee"),
+      v.literal("payee"),
+      v.literal("en_retard"),
+    ),
+    issuedAt: v.number(),
+    dueAt: v.optional(v.number()),
+    paidAt: v.optional(v.number()),
+    documentIds: v.array(v.id("ptDocuments")),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_status", ["status"]),
+
+  /** Documents rattachés à un projet (et éventuellement pointage/dépense/facture).
+   *  Un document ajouté lors d'un pointage porte le projet du pointage : il se
+   *  retrouve donc dans la fiche du projet relié. */
+  ptDocuments: defineTable({
+    storageId: v.id("_storage"),
+    name: v.string(),
+    mimeType: v.optional(v.string()),
+    projectId: v.id("ptProjects"),
+    timeEntryId: v.optional(v.id("ptTimeEntries")),
+    expenseId: v.optional(v.id("ptExpenses")),
+    invoiceId: v.optional(v.id("ptInvoices")),
+    uploadedAt: v.number(),
+    uploadedBy: v.optional(v.string()),
+  }).index("by_project", ["projectId"]),
   },
   { schemaValidation: false },
 );
