@@ -1,3 +1,4 @@
+import { jsPDF } from "jspdf";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { companyDepotUrl, makeQrDataUrl } from "./qr";
 
@@ -60,8 +61,17 @@ export async function downloadCompanyLabelPng(company: Company): Promise<void> {
 
 export async function printCompanyLabel(company: Company): Promise<void> {
   const pngUrl = await generateCompanyLabelPngDataUrl(company);
-  const printWindow = window.open("", "_blank", "width=640,height=420");
+  const printWindow = window.open("", "_blank", "width=820,height=520");
   if (!printWindow) throw new Error("Impossible d'ouvrir la fenêtre d'impression.");
+
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: [LABEL_W_MM, LABEL_H_MM],
+    compress: true,
+  });
+  doc.addImage(pngUrl, "PNG", 0, 0, LABEL_W_MM, LABEL_H_MM);
+  const pdfUrl = URL.createObjectURL(doc.output("blob"));
 
   printWindow.document.write(`<!doctype html>
 <html lang="fr">
@@ -76,34 +86,45 @@ export async function printCompanyLabel(company: Company): Promise<void> {
 
       html,
       body {
-        width: ${LABEL_W_MM}mm;
-        height: ${LABEL_H_MM}mm;
+        width: 100%;
+        height: 100%;
         margin: 0;
         padding: 0;
-        background: #ffffff;
+        background: #f3f4f6;
       }
 
-      body {
-        display: grid;
-        place-items: center;
+      iframe {
+        width: 100vw;
+        height: 100vh;
+        border: 0;
       }
 
-      img {
-        display: block;
-        width: ${LABEL_W_MM}mm;
-        height: ${LABEL_H_MM}mm;
-        object-fit: contain;
+      @media print {
+        iframe {
+          width: ${LABEL_W_MM}mm;
+          height: ${LABEL_H_MM}mm;
+        }
       }
     </style>
   </head>
   <body>
-    <img src="${pngUrl}" alt="Étiquette QR ${escapeHtml(company.name)}" />
+    <iframe title="Étiquette QR ${escapeHtml(company.name)}" src="${pdfUrl}"></iframe>
     <script>
-      const image = document.querySelector("img");
-      image.addEventListener("load", () => {
-        window.focus();
-        window.print();
+      const frame = document.querySelector("iframe");
+      const cleanup = () => {
+        URL.revokeObjectURL(${JSON.stringify(pdfUrl)});
+        window.close();
+      };
+      window.addEventListener("afterprint", cleanup);
+      frame.addEventListener("load", () => {
+        const target = frame.contentWindow || window;
+        target.addEventListener("afterprint", cleanup);
+        setTimeout(() => {
+          target.focus();
+          target.print();
+        }, 300);
       });
+      setTimeout(cleanup, 120000);
     </script>
   </body>
 </html>`);
