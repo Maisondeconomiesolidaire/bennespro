@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ClerkProvider, useAuth } from "@clerk/clerk-react";
 import { frFR } from "@clerk/localizations";
-import { ConvexReactClient } from "convex/react";
+import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import App from "./App";
 import { MissingConfig } from "./components/MissingConfig";
@@ -31,7 +31,8 @@ if (missing.length > 0) {
   );
 } else {
   const convex = new ConvexReactClient(convexUrl);
-  const satelliteProps = needsCentralAuthRedirect()
+  const useCentralAuth = needsCentralAuthRedirect();
+  const satelliteProps = useCentralAuth
     ? {
         isSatellite: true,
         domain: window.location.host,
@@ -48,13 +49,23 @@ if (missing.length > 0) {
           appearance={{ variables: { colorPrimary: "#47c667" } }}
           {...satelliteProps}
         >
-          <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-            <BrowserRouter>
-              <ToastProvider>
-                <App />
-              </ToastProvider>
-            </BrowserRouter>
-          </ConvexProviderWithClerk>
+          {useCentralAuth ? (
+            <ConvexProvider client={convex}>
+              <BrowserRouter>
+                <ToastProvider>
+                  <App />
+                </ToastProvider>
+              </BrowserRouter>
+            </ConvexProvider>
+          ) : (
+            <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+              <BrowserRouter>
+                <ToastProvider>
+                  <App />
+                </ToastProvider>
+              </BrowserRouter>
+            </ConvexProviderWithClerk>
+          )}
         </ClerkProvider>
       </ErrorBoundary>
     </StrictMode>,
