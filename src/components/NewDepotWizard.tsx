@@ -14,7 +14,17 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useUpload } from "../lib/useUpload";
-import { DIB_MATERIAL, MATERIALS, UNITS, unitLabel, type DepotItem, type Material, type Unit } from "../lib/materials";
+import {
+  DIB_MATERIAL,
+  ECODDS_SUBMATERIALS,
+  MATERIALS,
+  UNITS,
+  allowedUnitsForMaterial,
+  unitLabel,
+  type DepotItem,
+  type Material,
+  type Unit,
+} from "../lib/materials";
 import { generateBonDepotPdf, type BonDepotData } from "../lib/bonDepotPdf";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -31,6 +41,7 @@ import { cn } from "../lib/cn";
 type Step = 1 | 2 | 3 | 4 | 5;
 
 const STEP_LABELS = ["Entreprise", "Déchets", "Pièces jointes", "Signature", "Bon"];
+const ECODDS_GROUP_LABEL = "ECODDS";
 
 /** Convertit une data URL en File pour l'upload Convex. */
 async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
@@ -82,6 +93,7 @@ export function NewDepotWizard({
 
   // Étape 2
   const [items, setItems] = useState<DepotItem[]>([]);
+  const [showEcoddsSubmaterials, setShowEcoddsSubmaterials] = useState(false);
 
   // Étape 3
   const [ticketPhoto, setTicketPhoto] = useState<Id<"_storage"> | null>(null);
@@ -145,7 +157,11 @@ export function NewDepotWizard({
   }
 
   function addMaterial(material: Material) {
-    setItems((prev) => [...prev, { material, unit: "kg", quantity: 0, siteRef: siteRef.trim() }]);
+    const [defaultUnit] = allowedUnitsForMaterial(material);
+    setItems((prev) => [
+      ...prev,
+      { material, unit: defaultUnit, quantity: 0, siteRef: siteRef.trim() },
+    ]);
   }
   function patchItem(index: number, patch: Partial<DepotItem>) {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
@@ -359,7 +375,41 @@ export function NewDepotWizard({
                   ) : null}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setShowEcoddsSubmaterials((value) => !value)}
+                className={cn(
+                  "flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-3 py-2 text-center text-sm font-medium transition",
+                  showEcoddsSubmaterials
+                    ? "border-brand-400 bg-brand-50 text-brand-700"
+                    : "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:border-brand-400 hover:bg-[var(--accent)]",
+                )}
+              >
+                {ECODDS_GROUP_LABEL}
+                <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-foreground)]">
+                  Sous-categories
+                </span>
+              </button>
             </div>
+            {showEcoddsSubmaterials ? (
+              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted-foreground)]">
+                  Sous-categories ECODDS
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {ECODDS_SUBMATERIALS.map((material) => (
+                    <button
+                      key={material}
+                      type="button"
+                      onClick={() => addMaterial(material)}
+                      className="flex min-h-[56px] items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-center text-sm font-medium text-[var(--foreground)] transition hover:border-brand-400 hover:bg-[var(--accent)]"
+                    >
+                      {material.replace("ECODDS - ", "")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <p className="mt-2 text-xs text-[var(--muted-foreground)]">
               Seul le tout-venant / DIB non triés est facturé (au poids). Les autres flux sont gratuits.
             </p>
@@ -389,7 +439,10 @@ export function NewDepotWizard({
                     <Select
                       value={it.unit}
                       onChange={(unit) => patchItem(i, { unit: unit as Unit })}
-                      options={UNITS.map((u) => ({ value: u.value, label: u.label }))}
+                      options={UNITS.filter((unit) => allowedUnitsForMaterial(it.material).includes(unit.value)).map((u) => ({
+                        value: u.value,
+                        label: u.label,
+                      }))}
                     />
                   </div>
                   <div className="min-w-[120px] flex-1">
