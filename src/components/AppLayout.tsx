@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { AuthPanel } from "./AuthPanel";
+import { AppSwitcher } from "./AppSwitcher";
 import { useConvexAuth, useMutation } from "convex/react";
 import {
   Building2,
@@ -235,8 +236,9 @@ function SidebarContent({
 }) {
   return (
     <>
-      <div className="flex h-16 items-center border-b border-[var(--border)] px-5">
+      <div className="flex h-16 items-center justify-between gap-2 border-b border-[var(--border)] px-5">
         <Link to="/"><BrandLogo /></Link>
+        <AppSwitcher current="bennespro" />
       </div>
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">

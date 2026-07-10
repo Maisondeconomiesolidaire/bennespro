@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { useClerk, useUser } from "@clerk/clerk-react";
 import { Camera, Check, LogOut } from "lucide-react";
 import { cn } from "../lib/cn";
-import { MyAppsGrid } from "../components/MyApps";
 
 const INPUT =
   "mt-1 h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 text-sm text-[var(--foreground)] outline-none focus:border-brand-500";
@@ -12,7 +11,6 @@ export function Compte() {
   const { signOut } = useClerk();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<"infos" | "apps">("infos");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -64,28 +62,7 @@ export function Compte() {
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
       <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Mon compte</h1>
 
-      <nav className="mt-5 flex gap-1 overflow-x-auto border-b border-[var(--border)]">
-        {([{ key: "infos", label: "Informations" }, { key: "apps", label: "Mes applications" }] as const).map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={cn(
-              "shrink-0 border-b-2 px-4 py-2.5 text-sm font-semibold transition",
-              tab === t.key
-                ? "border-brand-500 text-[var(--foreground)]"
-                : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
       <div className="mt-6">
-        {tab === "apps" ? (
-          <MyAppsGrid current="bennespro" />
-        ) : (
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
               <span className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-2xl font-semibold text-white">
@@ -152,7 +129,6 @@ export function Compte() {
               </div>
             </div>
           </section>
-        )}
       </div>
     </div>
   );
