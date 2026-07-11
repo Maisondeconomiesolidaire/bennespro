@@ -182,6 +182,9 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
             <Menu className="h-5 w-5" />
           </button>
           <Link to="/"><BrandLogo compact /></Link>
+          <div className="ml-auto flex items-center gap-1">
+            <AppSwitcher current="bennespro" />
+          </div>
         </header>
 
         {mobileOpen ? (
