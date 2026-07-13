@@ -1,24 +1,6 @@
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { SignedIn, SignedOut } from "@clerk/clerk-react";
-import { ArrowRight, MessageSquare, Truck, Upload } from "lucide-react";
-
-const FEATURES = [
-  {
-    icon: Truck,
-    title: "Vos dépôts en un coup d'œil",
-    text: "Retrouvez l'historique de vos dépôts, téléchargez vos bons de dépôt et vos factures DIB.",
-  },
-  {
-    icon: Upload,
-    title: "Vos documents centralisés",
-    text: "Transmettez votre KBIS, votre RIB… et recevez les documents que nous partageons avec vous.",
-  },
-  {
-    icon: MessageSquare,
-    title: "Une messagerie directe",
-    text: "Échangez avec notre équipe sans passer par l'email, tout est regroupé dans votre espace.",
-  },
-];
+import { ArrowRight } from "lucide-react";
 
 /** Accueil public. Gère la redirection des anciens QR `/?entreprise=<id>`. */
 export function Landing() {
@@ -67,21 +49,6 @@ export function Landing() {
             </Link>
           </SignedOut>
         </div>
-      </section>
-
-      <section className="grid gap-4 pb-16 sm:grid-cols-3">
-        {FEATURES.map((f) => {
-          const Icon = f.icon;
-          return (
-            <div key={f.title} className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-600">
-                <Icon className="h-5 w-5" />
-              </div>
-              <h2 className="mt-4 text-base font-bold text-zinc-950">{f.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-zinc-600">{f.text}</p>
-            </div>
-          );
-        })}
       </section>
     </div>
   );

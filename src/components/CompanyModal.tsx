@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Building2, Download, FileText, MessageSquare, Send, Trash2, Upload } from "lucide-react";
+import { BadgeCheck, Building2, Check, Download, FileText, MessageSquare, Send, Trash2, Upload } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Modal } from "./ui/Modal";
@@ -227,6 +227,7 @@ function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"> }) {
   const documents = useQuery(api.bennespro.listCompanyDocuments, { companyId });
   const addDoc = useMutation(api.bennespro.addCompanyDocument);
   const removeDoc = useMutation(api.bennespro.removeCompanyDocument);
+  const validateDoc = useMutation(api.bennespro.validateCompanyDocument);
   const upload = useUpload();
   const toast = useToast();
   const [docType, setDocType] = useState<DocType>("autre");
@@ -290,11 +291,37 @@ function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"> }) {
               <FileText className="h-5 w-5 shrink-0 text-[var(--muted-foreground)]" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-[var(--foreground)]">{doc.name}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  {docTypeLabel(doc.docType)} ·{" "}
-                  {doc.uploadedByRole === "client" ? "Transmis par le client" : "Partagé par vous"}
+                <p className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                  <span>
+                    {docTypeLabel(doc.docType)} ·{" "}
+                    {doc.uploadedByRole === "client" ? "Transmis par le client" : "Partagé par vous"}
+                  </span>
+                  {doc.validated ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 font-semibold text-brand-700">
+                      <BadgeCheck className="h-3 w-3" /> Validé
+                    </span>
+                  ) : doc.uploadedByRole === "client" ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">
+                      En attente de validation
+                    </span>
+                  ) : null}
                 </p>
               </div>
+              {doc.uploadedByRole === "client" ? (
+                <button
+                  type="button"
+                  onClick={() => void validateDoc({ documentId: doc._id, validated: !doc.validated })}
+                  className={cn(
+                    "inline-flex h-8 w-8 items-center justify-center rounded-lg",
+                    doc.validated
+                      ? "text-brand-600 hover:bg-brand-50"
+                      : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                  )}
+                  title={doc.validated ? "Annuler la validation" : "Marquer comme validé"}
+                >
+                  <Check className="h-4 w-4" />
+                </button>
+              ) : null}
               <a
                 href={doc.url ?? undefined}
                 target="_blank"

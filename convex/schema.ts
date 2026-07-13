@@ -1391,6 +1391,8 @@ export default defineSchema(
       v.literal("kbis"),
       v.literal("rib"),
       v.literal("assurance"),
+      v.literal("convention"),
+      v.literal("protocole"),
       v.literal("autre"),
     ),
     mimeType: v.optional(v.string()),
@@ -1398,6 +1400,9 @@ export default defineSchema(
     uploadedByRole: v.union(v.literal("client"), v.literal("staff")),
     /** Horodatage de partage au client (docs staff visibles côté client). */
     sharedWithClientAt: v.optional(v.number()),
+    /** Validation par le staff d'un document signé (convention, protocole…). */
+    validatedAt: v.optional(v.number()),
+    validatedBy: v.optional(v.string()),
     createdBy: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_company", ["companyId"]),

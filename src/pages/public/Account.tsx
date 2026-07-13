@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "convex/react";
 import {
+  AlertTriangle,
   Building2,
+  Check,
+  Clock,
   Download,
   FileText,
   MessageSquare,
@@ -20,7 +23,7 @@ import { FullSpinner } from "../../components/ui/Spinner";
 import { BillingBadge } from "../../components/ui/BillingBadge";
 import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
-import { COMPANY_TYPE_OPTIONS, DOC_TYPE_OPTIONS, docTypeLabel, type CompanyType, type DocType } from "../../lib/companyProfile";
+import { COMPANY_TYPE_OPTIONS, DOC_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
 import { unitLabel } from "../../lib/materials";
 import { cn } from "../../lib/cn";
@@ -36,9 +39,17 @@ const TABS = [
 
 /** Coquille de l'espace client avec les onglets. */
 export function AccountLayout() {
+  const claim = useMutation(api.bennespro.claimMyCompanyByEmail);
+
+  // À l'arrivée : rattache automatiquement une entreprise existante (dépôts) via l'email.
+  useEffect(() => {
+    void claim({});
+  }, [claim]);
+
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-6">
       <h1 className="text-2xl font-black tracking-tight text-zinc-950">Mon espace client</h1>
+      <RequiredActions />
       <nav className="mt-5 flex flex-wrap gap-2 border-b border-zinc-200 pb-px">
         {TABS.map((t) => {
           const Icon = t.icon;
@@ -64,6 +75,102 @@ export function AccountLayout() {
       </nav>
       <div className="mt-6">
         <Outlet />
+      </div>
+    </div>
+  );
+}
+
+/** Bandeau « Actions requises » : signature des documents obligatoires. */
+function RequiredActions() {
+  const company = useQuery(api.bennespro.getMyCompany, {});
+  const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
+  const addDocument = useMutation(api.bennespro.addMyDocument);
+  const upload = useUpload();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  if (!company || documents === undefined) return null;
+
+  const statuses = REQUIRED_DOCS.map((req) => {
+    const mine = documents.filter((d) => d.docType === req.type && d.uploadedByRole === "client");
+    const validated = mine.some((d) => d.validated);
+    const pending = mine.length > 0 && !validated;
+    const status: "todo" | "pending" | "validated" = validated
+      ? "validated"
+      : pending
+        ? "pending"
+        : "todo";
+    return { ...req, status };
+  });
+
+  if (statuses.every((s) => s.status === "validated")) return null;
+
+  async function uploadSigned(type: DocType, file: File | null) {
+    if (!file) return;
+    setBusy(type);
+    try {
+      const storageId = await upload(file);
+      await addDocument({ storageId, name: file.name, docType: type, mimeType: file.type || undefined });
+      toast.success("Document transmis. En attente de validation.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Envoi impossible.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded-3xl border border-amber-300 bg-amber-50 p-5">
+      <div className="flex items-center gap-2 text-amber-800">
+        <AlertTriangle className="h-5 w-5" />
+        <h2 className="text-sm font-bold">Actions requises</h2>
+      </div>
+      <p className="mt-1 text-sm text-amber-800/80">
+        Merci de signer et de nous transmettre les documents obligatoires suivants.
+      </p>
+      <div className="mt-4 space-y-2.5">
+        {statuses.map((s) => (
+          <div
+            key={s.type}
+            className="flex flex-col gap-2 rounded-2xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-950">{s.label}</p>
+              <a
+                href={s.template}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Télécharger le document à signer
+              </a>
+            </div>
+            <div className="shrink-0">
+              {s.status === "validated" ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1.5 text-xs font-semibold text-brand-700">
+                  <Check className="h-3.5 w-3.5" /> Validé
+                </span>
+              ) : s.status === "pending" ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                  <Clock className="h-3.5 w-3.5" /> En attente de validation
+                </span>
+              ) : (
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-600">
+                  <Upload className="h-3.5 w-3.5" />
+                  {busy === s.type ? "Envoi…" : "Envoyer le document signé"}
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    disabled={busy === s.type}
+                    onChange={(e) => uploadSigned(s.type, e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -31,9 +31,20 @@ export const DOC_TYPE_OPTIONS: { value: DocType; label: string }[] = [
   { value: "kbis", label: "KBIS / avis de situation" },
   { value: "rib", label: "RIB" },
   { value: "assurance", label: "Assurance" },
+  { value: "convention", label: "Convention signée" },
+  { value: "protocole", label: "Protocole de sécurité signé" },
   { value: "autre", label: "Autre" },
 ];
 
 export function docTypeLabel(type: DocType): string {
   return DOC_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? "Document";
 }
+
+/**
+ * Documents obligatoires à signer par le client (téléchargement du modèle vierge,
+ * signature, puis upload → considéré signé, en attente de validation staff).
+ */
+export const REQUIRED_DOCS: { type: DocType; label: string; template: string }[] = [
+  { type: "convention", label: "Convention", template: "/convention.pdf" },
+  { type: "protocole", label: "Protocole de sécurité", template: "/protocole-de-securite.pdf" },
+];

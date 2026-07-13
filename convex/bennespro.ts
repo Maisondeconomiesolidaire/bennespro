@@ -100,8 +100,33 @@ const bpDocType = v.union(
   v.literal("kbis"),
   v.literal("rib"),
   v.literal("assurance"),
+  v.literal("convention"),
+  v.literal("protocole"),
   v.literal("autre"),
 );
+
+/**
+ * Cherche une entreprise « adoptable » (sans compte client) dont l'email de
+ * contact ou de facturation correspond à l'un des emails fournis. Sert à
+ * rattacher automatiquement les dépôts existants au nouveau compte client.
+ */
+async function findAdoptableCompanyByEmail(
+  ctx: QueryCtx | MutationCtx,
+  emails: Array<string | undefined | null>,
+): Promise<Doc<"bpCompanies"> | null> {
+  const set = new Set(
+    emails.map((e) => e?.trim().toLowerCase()).filter((e): e is string => !!e),
+  );
+  if (set.size === 0) return null;
+  const companies = await ctx.db.query("bpCompanies").collect();
+  return (
+    companies.find(
+      (c) =>
+        !c.ownerUserId &&
+        [c.contactEmail, c.billingEmail].some((e) => e && set.has(e.trim().toLowerCase())),
+    ) ?? null
+  );
+}
 
 function serializeBpMessage(m: Doc<"bpCompanyMessages">) {
   return {
@@ -126,6 +151,27 @@ export const getMyCompany = query({
       .query("bpCompanies")
       .withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject))
       .first();
+  },
+});
+
+/**
+ * Rattache automatiquement une entreprise existante (créée par le staff, sans
+ * compte) au client courant si son email correspond — récupère ainsi ses dépôts.
+ * Idempotent : sans correspondance, ne fait rien.
+ */
+export const claimMyCompanyByEmail = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireUser(ctx);
+    const owned = await ctx.db
+      .query("bpCompanies")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject))
+      .first();
+    if (owned) return owned._id;
+    const match = await findAdoptableCompanyByEmail(ctx, [identity.email]);
+    if (!match) return null;
+    await ctx.db.patch(match._id, { ownerUserId: identity.subject });
+    return match._id;
   },
 });
 
@@ -163,6 +209,17 @@ export const saveMyCompany = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, patch);
       return existing._id;
+    }
+    // Pas encore de compte : on tente de rattacher une entreprise existante
+    // (créée par le staff) via l'email, pour récupérer ses dépôts.
+    const adoptable = await findAdoptableCompanyByEmail(ctx, [
+      args.contactEmail,
+      args.billingEmail,
+      identity.email,
+    ]);
+    if (adoptable) {
+      await ctx.db.patch(adoptable._id, { ...patch, ownerUserId: identity.subject });
+      return adoptable._id;
     }
     return await ctx.db.insert("bpCompanies", {
       ...patch,
@@ -214,6 +271,8 @@ export const listMyDocuments = query({
           docType: d.docType,
           mimeType: d.mimeType ?? null,
           uploadedByRole: d.uploadedByRole,
+          validated: d.validatedAt !== undefined,
+          validatedAt: d.validatedAt ?? null,
           createdAt: d.createdAt,
           url: await ctx.storage.getUrl(d.storageId),
         })),
@@ -308,10 +367,25 @@ export const listCompanyDocuments = query({
           mimeType: d.mimeType ?? null,
           uploadedByRole: d.uploadedByRole,
           sharedWithClientAt: d.sharedWithClientAt ?? null,
+          validated: d.validatedAt !== undefined,
+          validatedAt: d.validatedAt ?? null,
           createdAt: d.createdAt,
           url: await ctx.storage.getUrl(d.storageId),
         })),
     );
+  },
+});
+
+/** Le staff valide un document signé (convention, protocole…). */
+export const validateCompanyDocument = mutation({
+  args: { documentId: v.id("bpCompanyDocuments"), validated: v.boolean() },
+  handler: async (ctx, { documentId, validated }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    const identity = await requireUser(ctx);
+    await ctx.db.patch(documentId, {
+      validatedAt: validated ? Date.now() : undefined,
+      validatedBy: validated ? identity.email ?? undefined : undefined,
+    });
   },
 });
 
