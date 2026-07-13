@@ -94,12 +94,14 @@ function RequiredActions() {
   if (!company || documents === undefined) return null;
 
   const statuses = REQUIRED_DOCS.map((req) => {
-    const mine = documents.filter((d) => d.docType === req.type && d.uploadedByRole === "client");
-    const validated = mine.some((d) => d.validated);
-    const pending = mine.length > 0 && !validated;
-    const status: "todo" | "pending" | "validated" = validated
+    const signed =
+      req.type === "convention"
+        ? company.conventionSignedAt !== undefined
+        : company.protocoleSignedAt !== undefined;
+    const uploaded = documents.some((d) => d.docType === req.type && d.uploadedByRole === "client");
+    const status: "todo" | "pending" | "validated" = signed
       ? "validated"
-      : pending
+      : uploaded
         ? "pending"
         : "todo";
     return { ...req, status };

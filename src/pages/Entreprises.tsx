@@ -225,6 +225,11 @@ function CompanyDetailModal({
               <Button variant="secondary" size="sm" onClick={() => onShowQr({ _id: company._id, name: company.name, siret: company.siret })}>
                 <QrCode className="h-4 w-4" /> QR code
               </Button>
+              {canDelete ? (
+                <Button variant="danger" size="sm" onClick={() => setConfirmOpen(true)}>
+                  <Trash2 className="h-4 w-4" /> Supprimer
+                </Button>
+              ) : null}
             </div>
           </div>
 
@@ -311,14 +316,6 @@ function CompanyDetailModal({
 
           {tab === "depots" ? (
             <CompanyDepots depots={company.depots} />
-          ) : null}
-
-          {canDelete ? (
-            <div className="flex justify-end border-t border-[var(--border)] pt-4">
-              <Button variant="danger" onClick={() => setConfirmOpen(true)}>
-                <Trash2 className="h-4 w-4" /> Supprimer définitivement
-              </Button>
-            </div>
           ) : null}
         </div>
       )}

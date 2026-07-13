@@ -21,22 +21,31 @@ import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
 
 export type ComplianceStatus = "validated" | "pending" | "missing";
 
-/** Statut de signature des documents obligatoires (convention, protocole). */
+/**
+ * Statut des documents obligatoires : « validated » si le staff a coché
+ * « Signé » (flag sur l'entreprise), sinon « pending » si un document du type
+ * a été déposé (client ou staff), sinon « missing ».
+ */
 async function companyCompliance(
   ctx: QueryCtx | MutationCtx,
-  companyId: Id<"bpCompanies">,
+  company: Doc<"bpCompanies">,
 ): Promise<{ convention: ComplianceStatus; protocole: ComplianceStatus }> {
   const docs = await ctx.db
     .query("bpCompanyDocuments")
-    .withIndex("by_company", (q) => q.eq("companyId", companyId))
+    .withIndex("by_company", (q) => q.eq("companyId", company._id))
     .collect();
-  const statusFor = (type: "convention" | "protocole"): ComplianceStatus => {
-    const typed = docs.filter((d) => d.docType === type);
-    if (typed.some((d) => d.validatedAt !== undefined)) return "validated";
-    if (typed.some((d) => d.uploadedByRole === "client")) return "pending";
+  const statusFor = (
+    type: "convention" | "protocole",
+    signedAt: number | undefined,
+  ): ComplianceStatus => {
+    if (signedAt !== undefined) return "validated";
+    if (docs.some((d) => d.docType === type)) return "pending";
     return "missing";
   };
-  return { convention: statusFor("convention"), protocole: statusFor("protocole") };
+  return {
+    convention: statusFor("convention", company.conventionSignedAt),
+    protocole: statusFor("protocole", company.protocoleSignedAt),
+  };
 }
 
 export const listCompanies = query({
@@ -46,7 +55,7 @@ export const listCompanies = query({
     const companies = await ctx.db.query("bpCompanies").order("desc").collect();
     const sorted = companies.sort((a, b) => a.name.localeCompare(b.name, "fr"));
     return Promise.all(
-      sorted.map(async (c) => ({ ...c, compliance: await companyCompliance(ctx, c._id) })),
+      sorted.map(async (c) => ({ ...c, compliance: await companyCompliance(ctx, c) })),
     );
   },
 });
@@ -69,7 +78,7 @@ export const getCompany = query({
       .collect();
     return {
       ...company,
-      compliance: await companyCompliance(ctx, companyId),
+      compliance: await companyCompliance(ctx, company),
       vehicles,
       depots: depots.map((depot) => ({
         ...depot,
@@ -388,6 +397,7 @@ export const listCompanyDocuments = query({
           _id: d._id,
           name: d.name,
           docType: d.docType,
+          note: d.note ?? null,
           mimeType: d.mimeType ?? null,
           uploadedByRole: d.uploadedByRole,
           sharedWithClientAt: d.sharedWithClientAt ?? null,
@@ -397,6 +407,37 @@ export const listCompanyDocuments = query({
           url: await ctx.storage.getUrl(d.storageId),
         })),
     );
+  },
+});
+
+/** État de conformité (statuts + flags « Signé ») pour l'onglet Documents CRM. */
+export const companyComplianceState = query({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const company = await ctx.db.get(companyId);
+    if (!company) return null;
+    const compliance = await companyCompliance(ctx, company);
+    return {
+      convention: compliance.convention,
+      protocole: compliance.protocole,
+      conventionSigned: company.conventionSignedAt !== undefined,
+      protocoleSigned: company.protocoleSignedAt !== undefined,
+    };
+  },
+});
+
+/** Le staff marque un document obligatoire comme « Signé » (ou l'annule). */
+export const setComplianceSigned = mutation({
+  args: {
+    companyId: v.id("bpCompanies"),
+    type: v.union(v.literal("convention"), v.literal("protocole")),
+    signed: v.boolean(),
+  },
+  handler: async (ctx, { companyId, type, signed }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    const field = type === "convention" ? "conventionSignedAt" : "protocoleSignedAt";
+    await ctx.db.patch(companyId, { [field]: signed ? Date.now() : undefined });
   },
 });
 
@@ -419,7 +460,8 @@ export const addCompanyDocument = mutation({
     companyId: v.id("bpCompanies"),
     storageId: v.id("_storage"),
     name: v.string(),
-    docType: bpDocType,
+    docType: v.optional(bpDocType),
+    note: v.optional(v.string()),
     mimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -429,7 +471,8 @@ export const addCompanyDocument = mutation({
       companyId: args.companyId,
       storageId: args.storageId,
       name: args.name.trim(),
-      docType: args.docType,
+      docType: args.docType ?? "autre",
+      note: args.note?.trim() || undefined,
       mimeType: args.mimeType,
       uploadedByRole: "staff",
       sharedWithClientAt: Date.now(),

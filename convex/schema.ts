@@ -1375,6 +1375,9 @@ export default defineSchema(
     companyTypeOther: v.optional(v.string()),
     /** Sujet Clerk du client propriétaire (compte espace client). */
     ownerUserId: v.optional(v.string()),
+    /** Documents obligatoires marqués « Signé » par le staff. */
+    conventionSignedAt: v.optional(v.number()),
+    protocoleSignedAt: v.optional(v.number()),
     /** Client Stripe associé (facturation du DIB). */
     stripeCustomerId: v.optional(v.string()),
     createdAt: v.number(),
@@ -1396,6 +1399,8 @@ export default defineSchema(
       v.literal("autre"),
     ),
     mimeType: v.optional(v.string()),
+    /** Message de contexte optionnel joint au document. */
+    note: v.optional(v.string()),
     /** Qui a déposé le document (portail client ou CRM). */
     uploadedByRole: v.union(v.literal("client"), v.literal("staff")),
     /** Horodatage de partage au client (docs staff visibles côté client). */

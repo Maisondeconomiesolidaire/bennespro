@@ -1,31 +1,49 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { BadgeCheck, Check, Download, FileText, Send, Trash2, Upload } from "lucide-react";
+import { BadgeCheck, Clock, Download, FileText, Send, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { Field } from "../ui/Field";
 import { Input } from "../ui/Field";
-import { Select } from "../ui/Select";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { FileButton } from "../ui/FileButton";
 import { FullSpinner } from "../ui/Spinner";
 import { useToast } from "../ui/Toast";
 import { useUpload } from "../../lib/useUpload";
-import { DOC_TYPE_OPTIONS, docTypeLabel, type DocType } from "../../lib/companyProfile";
+import { REQUIRED_DOCS, type DocType } from "../../lib/companyProfile";
 import { cn } from "../../lib/cn";
+
+type ComplianceStatus = "validated" | "pending" | "missing";
+
+function StatusChip({ status }: { status: ComplianceStatus }) {
+  const map = {
+    validated: { style: "bg-brand-100 text-brand-700", Icon: BadgeCheck, label: "Signé" },
+    pending: { style: "bg-amber-100 text-amber-700", Icon: Clock, label: "Reçu, à valider" },
+    missing: { style: "bg-red-100 text-red-600", Icon: ShieldAlert, label: "Manquant" },
+  } as const;
+  const { style, Icon, label } = map[status];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", style)}>
+      <Icon className="h-3 w-3" /> {label}
+    </span>
+  );
+}
 
 /* ─── Onglet Documents (staff) ────────────────────────────────────────────── */
 
 export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"> }) {
   const documents = useQuery(api.bennespro.listCompanyDocuments, { companyId });
+  const compliance = useQuery(api.bennespro.companyComplianceState, { companyId });
   const addDoc = useMutation(api.bennespro.addCompanyDocument);
   const removeDoc = useMutation(api.bennespro.removeCompanyDocument);
-  const validateDoc = useMutation(api.bennespro.validateCompanyDocument);
+  const setSigned = useMutation(api.bennespro.setComplianceSigned);
   const upload = useUpload();
   const toast = useToast();
-  const [docType, setDocType] = useState<DocType>("autre");
+  const [note, setNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [busyType, setBusyType] = useState<DocType | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,8 +54,9 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
     setUploading(true);
     try {
       const storageId = await upload(file);
-      await addDoc({ companyId, storageId, name: file.name, docType, mimeType: file.type || undefined });
+      await addDoc({ companyId, storageId, name: file.name, note: note.trim() || undefined, mimeType: file.type || undefined });
       setFile(null);
+      setNote("");
       toast.success("Document partagé avec le client.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Envoi impossible.");
@@ -46,17 +65,61 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
     }
   }
 
+  async function importSigned(type: DocType, f: File | null) {
+    if (!f) return;
+    setBusyType(type);
+    try {
+      const storageId = await upload(f);
+      await addDoc({ companyId, storageId, name: f.name, docType: type, mimeType: f.type || undefined });
+      toast.success("Document signé importé.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Envoi impossible.");
+    } finally {
+      setBusyType(null);
+    }
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Conformité : convention & protocole signés. */}
+      <div className="space-y-2.5 rounded-xl border border-[var(--border)] p-3">
+        <p className="text-sm font-semibold text-[var(--foreground)]">Documents obligatoires</p>
+        {REQUIRED_DOCS.map((req) => {
+          const status = (req.type === "convention" ? compliance?.convention : compliance?.protocole) ?? "missing";
+          const signed = req.type === "convention" ? compliance?.conventionSigned : compliance?.protocoleSigned;
+          return (
+            <div key={req.type} className="flex flex-col gap-2 rounded-lg bg-[var(--card)] p-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-[var(--foreground)]">{req.label}</span>
+                <StatusChip status={status} />
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <FileButton
+                  onFile={(f) => importSigned(req.type, f)}
+                  accept="application/pdf,image/*"
+                  disabled={busyType === req.type}
+                  label={busyType === req.type ? "Import…" : "Importer le signé"}
+                />
+                <Checkbox
+                  checked={!!signed}
+                  onChange={(v) => void setSigned({ companyId, type: req.type as "convention" | "protocole", signed: v })}
+                  label="Signé"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Ajout d'un document libre (avec message de contexte optionnel). */}
       <form onSubmit={submit} className="space-y-3 rounded-xl border border-[var(--border)] p-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Type">
-            <Select<DocType> value={docType} onChange={setDocType} options={DOC_TYPE_OPTIONS} />
-          </Field>
-          <Field label="Fichier">
-            <FileButton onFile={setFile} accept="application/pdf,image/*" selectedName={file?.name} />
-          </Field>
-        </div>
+        <p className="text-sm font-semibold text-[var(--foreground)]">Partager un document</p>
+        <Field label="Fichier">
+          <FileButton onFile={setFile} accept="application/pdf,image/*" selectedName={file?.name} />
+        </Field>
+        <Field label="Message (optionnel)">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contexte du document…" />
+        </Field>
         <div className="flex justify-end">
           <Button type="submit" size="sm" disabled={uploading}>
             <Upload className="mr-1.5 h-4 w-4" />
@@ -76,37 +139,11 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
               <FileText className="h-5 w-5 shrink-0 text-[var(--muted-foreground)]" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-[var(--foreground)]">{doc.name}</p>
-                <p className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
-                  <span>
-                    {docTypeLabel(doc.docType)} ·{" "}
-                    {doc.uploadedByRole === "client" ? "Transmis par le client" : "Partagé par vous"}
-                  </span>
-                  {doc.validated ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 font-semibold text-brand-700">
-                      <BadgeCheck className="h-3 w-3" /> Validé
-                    </span>
-                  ) : doc.uploadedByRole === "client" ? (
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">
-                      En attente de validation
-                    </span>
-                  ) : null}
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {doc.uploadedByRole === "client" ? "Transmis par le client" : "Partagé par vous"}
                 </p>
+                {doc.note ? <p className="mt-0.5 text-xs italic text-[var(--muted-foreground)]">« {doc.note} »</p> : null}
               </div>
-              {doc.uploadedByRole === "client" ? (
-                <button
-                  type="button"
-                  onClick={() => void validateDoc({ documentId: doc._id, validated: !doc.validated })}
-                  className={cn(
-                    "inline-flex h-8 w-8 items-center justify-center rounded-lg",
-                    doc.validated
-                      ? "text-brand-600 hover:bg-brand-50"
-                      : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                  )}
-                  title={doc.validated ? "Annuler la validation" : "Marquer comme validé"}
-                >
-                  <Check className="h-4 w-4" />
-                </button>
-              ) : null}
               <a
                 href={doc.url ?? undefined}
                 target="_blank"
