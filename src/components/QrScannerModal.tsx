@@ -117,7 +117,7 @@ export function QrScannerModal({
   }, [open, onScan]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Scanner un QR code entreprise" className="sm:h-auto sm:w-[520px]">
+    <Modal open={open} onClose={onClose} title="Scanner un QR code entreprise">
       <div className="space-y-3">
         {error ? (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--muted)] px-6 py-10 text-center">

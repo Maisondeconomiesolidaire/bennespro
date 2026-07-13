@@ -7,6 +7,7 @@ import {
   Building2,
   LogOut,
   Menu,
+  MessageSquare,
   Moon,
   Recycle,
   Sun,
@@ -31,6 +32,7 @@ const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(42,167,155,0
 const NAV_ITEMS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/crm", label: "Dépôts", icon: Recycle },
   { to: "/crm/entreprises", label: "Entreprises", icon: Building2 },
+  { to: "/crm/messagerie", label: "Messagerie", icon: MessageSquare },
   { to: "/crm/dib", label: "DIB", icon: Truck },
 ];
 

@@ -4,6 +4,7 @@ import { RequirePermission } from "./components/RequirePermission";
 import { PAGE_DEPOTS, PAGE_ENTREPRISES } from "./lib/permissions";
 import { Depots } from "./pages/Depots";
 import { Entreprises } from "./pages/Entreprises";
+import { Messages } from "./pages/Messages";
 import { Dib } from "./pages/Dib";
 import { Compte } from "./pages/Compte";
 import { PublicLayout } from "./components/public/PublicLayout";
@@ -58,6 +59,14 @@ export default function App() {
             element={
               <RequirePermission pageKey={PAGE_ENTREPRISES}>
                 <Entreprises />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="messagerie"
+            element={
+              <RequirePermission pageKey={PAGE_ENTREPRISES}>
+                <Messages />
               </RequirePermission>
             }
           />

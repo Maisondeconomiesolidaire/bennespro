@@ -21,6 +21,7 @@ import { AddressAutocomplete } from "../../components/ui/AddressAutocomplete";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { FullSpinner } from "../../components/ui/Spinner";
 import { BillingBadge } from "../../components/ui/BillingBadge";
+import { FileButton } from "../../components/ui/FileButton";
 import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
 import { COMPANY_TYPE_OPTIONS, DOC_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
@@ -226,7 +227,6 @@ export function AccountInfo() {
   const [form, setForm] = useState<InfoForm>(EMPTY_INFO);
   const [kbisFile, setKbisFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!company) return;
@@ -281,7 +281,6 @@ export function AccountInfo() {
           mimeType: kbisFile.type || undefined,
         });
         setKbisFile(null);
-        if (fileRef.current) fileRef.current.value = "";
       }
       toast.success("Informations enregistrées.");
     } catch (err) {
@@ -353,15 +352,7 @@ export function AccountInfo() {
       </div>
 
       <Field label="KBIS ou avis de situation" hint="PDF ou image. Vous pourrez en ajouter d'autres depuis l'onglet Documents.">
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,image/*"
-            onChange={(e) => setKbisFile(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600"
-          />
-        </div>
+        <FileButton onFile={setKbisFile} accept="application/pdf,image/*" selectedName={kbisFile?.name} />
         {existingKbis.length > 0 && (
           <p className="mt-2 text-xs text-zinc-500">
             {existingKbis.length} document(s) déjà transmis.
@@ -495,7 +486,6 @@ export function AccountDocuments() {
   const [docType, setDocType] = useState<DocType>("kbis");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   if (company === undefined) return <FullSpinner label="Chargement…" />;
   if (!company) return <NeedsCompany />;
@@ -516,7 +506,6 @@ export function AccountDocuments() {
         mimeType: file.type || undefined,
       });
       setFile(null);
-      if (fileRef.current) fileRef.current.value = "";
       toast.success("Document transmis.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Envoi impossible.");
@@ -538,13 +527,7 @@ export function AccountDocuments() {
             />
           </Field>
           <Field label="Fichier">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600"
-            />
+            <FileButton onFile={setFile} accept="application/pdf,image/*" selectedName={file?.name} />
           </Field>
         </div>
         <div className="flex justify-end">

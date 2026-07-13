@@ -83,7 +83,6 @@ export function DepotDetailModal({
       open={depotId !== null}
       onClose={onClose}
       title={depot ? `Dépôt n° ${String(depot.depotNumber).padStart(4, "0")}` : "Dépôt"}
-      className="sm:h-auto sm:max-h-[85vh] sm:w-[720px]"
     >
       {depot === undefined ? (
         <FullSpinner />

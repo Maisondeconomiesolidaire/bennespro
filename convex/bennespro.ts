@@ -19,12 +19,35 @@ import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
+export type ComplianceStatus = "validated" | "pending" | "missing";
+
+/** Statut de signature des documents obligatoires (convention, protocole). */
+async function companyCompliance(
+  ctx: QueryCtx | MutationCtx,
+  companyId: Id<"bpCompanies">,
+): Promise<{ convention: ComplianceStatus; protocole: ComplianceStatus }> {
+  const docs = await ctx.db
+    .query("bpCompanyDocuments")
+    .withIndex("by_company", (q) => q.eq("companyId", companyId))
+    .collect();
+  const statusFor = (type: "convention" | "protocole"): ComplianceStatus => {
+    const typed = docs.filter((d) => d.docType === type);
+    if (typed.some((d) => d.validatedAt !== undefined)) return "validated";
+    if (typed.some((d) => d.uploadedByRole === "client")) return "pending";
+    return "missing";
+  };
+  return { convention: statusFor("convention"), protocole: statusFor("protocole") };
+}
+
 export const listCompanies = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "bennespro:entreprises", "read");
     const companies = await ctx.db.query("bpCompanies").order("desc").collect();
-    return companies.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    const sorted = companies.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    return Promise.all(
+      sorted.map(async (c) => ({ ...c, compliance: await companyCompliance(ctx, c._id) })),
+    );
   },
 });
 
@@ -46,6 +69,7 @@ export const getCompany = query({
       .collect();
     return {
       ...company,
+      compliance: await companyCompliance(ctx, companyId),
       vehicles,
       depots: depots.map((depot) => ({
         ...depot,
@@ -469,6 +493,46 @@ export const markCompanyMessagesRead = mutation({
         .filter((m) => m.senderRole === "client" && m.readByStaffAt === undefined)
         .map((m) => ctx.db.patch(m._id, { readByStaffAt: now })),
     );
+  },
+});
+
+/** Toutes les conversations clients (boîte de réception CRM), plus récentes d'abord. */
+export const listAllConversations = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const msgs = await ctx.db.query("bpCompanyMessages").collect();
+    const byCompany = new Map<
+      Id<"bpCompanies">,
+      { last: Doc<"bpCompanyMessages">; unread: number }
+    >();
+    for (const m of msgs) {
+      const agg = byCompany.get(m.companyId);
+      const unread = m.senderRole === "client" && m.readByStaffAt === undefined ? 1 : 0;
+      if (!agg) {
+        byCompany.set(m.companyId, { last: m, unread });
+      } else {
+        if (m.createdAt > agg.last.createdAt) agg.last = m;
+        agg.unread += unread;
+      }
+    }
+    const result = await Promise.all(
+      [...byCompany.entries()].map(async ([companyId, agg]) => {
+        const company = await ctx.db.get(companyId);
+        if (!company) return null;
+        return {
+          companyId,
+          companyName: company.name,
+          lastBody: agg.last.body,
+          lastAt: agg.last.createdAt,
+          lastRole: agg.last.senderRole,
+          unread: agg.unread,
+        };
+      }),
+    );
+    return result
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => b.lastAt - a.lastAt);
   },
 });
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { Building2, CalendarDays, Euro, ExternalLink, Info, Pencil, Plus, QrCode, Receipt, Trash2, Truck } from "lucide-react";
+import { BadgeCheck, Building2, CalendarDays, Clock, Euro, ExternalLink, FileText, Info, MessageSquare, Pencil, Plus, QrCode, Receipt, ShieldAlert, Trash2, Truck } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useAppActions } from "../lib/appActions";
@@ -11,13 +11,34 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { FullSpinner } from "../components/ui/Spinner";
 import { Modal } from "../components/ui/Modal";
 import { CompanyQrModal } from "../components/CompanyQrModal";
+import { CompanyDocumentsTab, CompanyMessagesTab } from "../components/crm/CompanyTabs";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { BillingBadge } from "../components/ui/BillingBadge";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useAccess } from "../components/RequirePermission";
 import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
+import { companyTypeLabel } from "../lib/companyProfile";
 import { useToast } from "../components/ui/Toast";
+
+type ComplianceStatus = "validated" | "pending" | "missing";
+
+/** Pastille de conformité (convention / protocole) affichée d'un coup d'œil. */
+function ComplianceChip({ label, status }: { label: string; status: ComplianceStatus }) {
+  const style =
+    status === "validated"
+      ? "bg-brand-100 text-brand-700"
+      : status === "pending"
+        ? "bg-amber-100 text-amber-700"
+        : "bg-red-100 text-red-600";
+  const Icon = status === "validated" ? BadgeCheck : status === "pending" ? Clock : ShieldAlert;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${style}`}>
+      <Icon className="h-3 w-3" />
+      {label}
+    </span>
+  );
+}
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const QTY = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
@@ -89,6 +110,10 @@ export function Entreprises() {
               <p className="mt-3 font-semibold text-[var(--foreground)]">{c.name}</p>
               {c.siret ? <p className="text-xs text-[var(--muted-foreground)]">SIRET {c.siret}</p> : null}
               {c.contactPhone ? <p className="text-xs text-[var(--muted-foreground)]">{c.contactPhone}</p> : null}
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                <ComplianceChip label="Convention" status={c.compliance.convention} />
+                <ComplianceChip label="Protocole" status={c.compliance.protocole} />
+              </div>
             </div>
           ))}
         </div>
@@ -132,7 +157,7 @@ function CompanyDetailModal({
   const [editId, setEditId] = useState<Id<"bpVehicles"> | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editPlate, setEditPlate] = useState("");
-  const [tab, setTab] = useState<"info" | "vehicles" | "depots">("info");
+  const [tab, setTab] = useState<"info" | "vehicles" | "depots" | "documents" | "messagerie">("info");
   const canDelete = canAccess(access, PAGE_ENTREPRISES, "delete");
 
   async function handleAdd() {
@@ -173,7 +198,6 @@ function CompanyDetailModal({
       open={companyId !== null}
       onClose={onClose}
       title={company?.name ?? "Entreprise"}
-      className="sm:h-auto sm:max-h-[85vh] sm:w-[860px]"
     >
       {company === undefined ? (
         <FullSpinner />
@@ -212,21 +236,35 @@ function CompanyDetailModal({
               { key: "info", label: "Informations", icon: Info },
               { key: "vehicles", label: "Véhicules", icon: Truck },
               { key: "depots", label: "Dépôts", icon: Receipt },
+              { key: "documents", label: "Documents", icon: FileText },
+              { key: "messagerie", label: "Messagerie", icon: MessageSquare },
             ]}
             counts={{ vehicles: company.vehicles.length, depots: company.depots.length }}
           />
 
           {tab === "info" ? (
-            <div className="grid gap-3 text-sm sm:grid-cols-2">
-              <Detail label="SIRET" value={company.siret} />
-              <Detail label="Téléphone" value={company.contactPhone} />
-              <Detail label="Contact" value={company.contactName} />
-              <Detail label="Email" value={company.contactEmail} />
-              <Detail label="Client Stripe" value={company.stripeCustomerId} />
-              <Detail label="Créée le" value={new Date(company.createdAt).toLocaleDateString("fr-FR")} />
-              <Detail label="Adresse" value={company.address} full />
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-1.5">
+                <ComplianceChip label="Convention" status={company.compliance.convention} />
+                <ComplianceChip label="Protocole de sécurité" status={company.compliance.protocole} />
+              </div>
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
+                <Detail label="SIRET" value={company.siret} />
+                <Detail label="Profil" value={companyTypeLabel(company.companyType, company.companyTypeOther)} />
+                <Detail label="Téléphone" value={company.contactPhone} />
+                <Detail label="Contact" value={company.contactName} />
+                <Detail label="Email" value={company.contactEmail} />
+                <Detail label="Email de facturation" value={company.billingEmail} />
+                <Detail label="Client Stripe" value={company.stripeCustomerId} />
+                <Detail label="Compte client" value={company.ownerUserId ? "Actif" : "—"} />
+                <Detail label="Créée le" value={new Date(company.createdAt).toLocaleDateString("fr-FR")} />
+                <Detail label="Adresse" value={company.address} full />
+              </div>
             </div>
           ) : null}
+
+          {tab === "documents" ? <CompanyDocumentsTab companyId={company._id} /> : null}
+          {tab === "messagerie" ? <CompanyMessagesTab companyId={company._id} /> : null}
 
           {tab === "vehicles" ? (
             <div>

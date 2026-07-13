@@ -64,7 +64,6 @@ export function CompanyQrModal({
       open={company !== null}
       onClose={onClose}
       title={justCreated ? "Entreprise créée !" : "QR code de l'entreprise"}
-      className="sm:h-auto sm:max-h-[85vh] sm:w-[480px]"
     >
       {company ? (
         <div className="flex flex-col items-center text-center">
