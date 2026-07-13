@@ -9,6 +9,7 @@ import {
   Download,
   FileText,
   MessageSquare,
+  Plus,
   Send,
   Truck,
   Upload,
@@ -24,7 +25,7 @@ import { BillingBadge } from "../../components/ui/BillingBadge";
 import { FileButton } from "../../components/ui/FileButton";
 import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
-import { COMPANY_TYPE_OPTIONS, DOC_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
+import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
 import { unitLabel } from "../../lib/materials";
 import { cn } from "../../lib/cn";
@@ -483,60 +484,48 @@ export function AccountDocuments() {
   const upload = useUpload();
   const toast = useToast();
 
-  const [docType, setDocType] = useState<DocType>("kbis");
-  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
   if (company === undefined) return <FullSpinner label="Chargement…" />;
   if (!company) return <NeedsCompany />;
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!file) {
-      toast.error("Sélectionnez un fichier.");
-      return;
-    }
+  async function handleFile(file: File | null) {
+    if (!file) return;
     setUploading(true);
     try {
       const storageId = await upload(file);
-      await addDocument({
-        storageId,
-        name: file.name,
-        docType,
-        mimeType: file.type || undefined,
-      });
-      setFile(null);
+      await addDocument({ storageId, name: file.name, docType: "autre", mimeType: file.type || undefined });
       toast.success("Document transmis.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Envoi impossible.");
     } finally {
       setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
   return (
     <div className="space-y-4">
-      <form onSubmit={submit} className={cn(CARD, "space-y-4")}>
-        <p className="text-sm font-semibold text-zinc-950">Transmettre un document</p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Type de document">
-            <Select<DocType>
-              value={docType}
-              onChange={setDocType}
-              options={DOC_TYPE_OPTIONS}
-            />
-          </Field>
-          <Field label="Fichier">
-            <FileButton onFile={setFile} accept="application/pdf,image/*" selectedName={file?.name} />
-          </Field>
-        </div>
-        <div className="flex justify-end">
-          <Button type="submit" disabled={uploading}>
-            <Upload className="mr-1.5 h-4 w-4" />
-            {uploading ? "Envoi…" : "Envoyer"}
-          </Button>
-        </div>
-      </form>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-zinc-950">Mes documents</p>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-60"
+        >
+          <Plus className="h-4 w-4" />
+          {uploading ? "Envoi…" : "Ajouter"}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+        />
+      </div>
 
       {documents === undefined ? (
         <FullSpinner label="Chargement des documents…" />

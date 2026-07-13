@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Loader2, X } from "lucide-react";
+import { Camera, ImagePlus, Loader2, X } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { cn } from "../../lib/cn";
 import { useUpload } from "../../lib/useUpload";
@@ -20,6 +20,7 @@ export function PhotoUpload({
 }) {
   const upload = useUpload();
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<LocalPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -44,6 +45,7 @@ export function PhotoUpload({
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
     }
   }
 
@@ -73,6 +75,18 @@ export function PhotoUpload({
         ))}
         <button
           type="button"
+          onClick={() => cameraRef.current?.click()}
+          disabled={uploading}
+          className={cn(
+            "flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-brand-300 bg-[var(--card)] text-brand-700 transition",
+            "hover:bg-brand-50",
+          )}
+        >
+          {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
+          <span className="text-xs font-medium">Photo</span>
+        </button>
+        <button
+          type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
           className={cn(
@@ -80,10 +94,19 @@ export function PhotoUpload({
             "hover:bg-brand-50",
           )}
         >
-          {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
-          <span className="text-xs font-medium">Ajouter</span>
+          <ImagePlus className="h-5 w-5" />
+          <span className="text-xs font-medium">Importer</span>
         </button>
       </div>
+      {/* Caméra directe (mobile) : capture arrière, une photo à la fois. */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(event) => handleFiles(event.target.files)}
+      />
       <input
         ref={inputRef}
         type="file"

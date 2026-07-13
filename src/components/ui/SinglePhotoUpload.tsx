@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ImagePlus, Loader2, X } from "lucide-react";
+import { Camera, ImagePlus, Loader2, X } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { cn } from "../../lib/cn";
 import { useUpload } from "../../lib/useUpload";
@@ -24,6 +24,7 @@ export function SinglePhotoUpload({
 }) {
   const upload = useUpload();
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -39,6 +40,7 @@ export function SinglePhotoUpload({
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
     }
   }
 
@@ -58,19 +60,41 @@ export function SinglePhotoUpload({
         {shownPreview ? (
           <img src={shownPreview} alt="" className="h-full w-full object-cover" />
         ) : (
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="flex h-full w-full flex-col items-center justify-center gap-2 text-brand-700 transition hover:bg-brand-50"
-          >
-            {uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
-            <span className="text-sm font-semibold">{uploading ? "Envoi..." : "Ajouter une photo"}</span>
-          </button>
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-3 text-brand-700">
+            {uploading ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600"
+                >
+                  <Camera className="h-4 w-4" /> Prendre une photo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-brand-300 bg-[var(--card)] px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
+                >
+                  <ImagePlus className="h-4 w-4" /> Importer
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {shownPreview ? (
           <div className="absolute right-2 top-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              disabled={uploading}
+              className="rounded-full bg-black/55 p-1.5 text-white hover:bg-black/70"
+              title="Reprendre une photo"
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </button>
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
@@ -89,6 +113,15 @@ export function SinglePhotoUpload({
           </div>
         ) : null}
       </div>
+      {/* Caméra directe (mobile) : capture arrière. */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(event) => handleFile(event.target.files?.[0])}
+      />
       <input
         ref={inputRef}
         type="file"
