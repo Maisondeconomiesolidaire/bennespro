@@ -475,10 +475,20 @@ export const addCompanyDocument = mutation({
       note: args.note?.trim() || undefined,
       mimeType: args.mimeType,
       uploadedByRole: "staff",
-      sharedWithClientAt: Date.now(),
+      // Non partagé par défaut : le staff décide explicitement via shareCompanyDocument.
+      sharedWithClientAt: undefined,
       createdBy: identity.email ?? undefined,
       createdAt: Date.now(),
     });
+  },
+});
+
+/** Le staff partage (rend visible côté client) un document ajouté. */
+export const shareCompanyDocument = mutation({
+  args: { documentId: v.id("bpCompanyDocuments"), shared: v.boolean() },
+  handler: async (ctx, { documentId, shared }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    await ctx.db.patch(documentId, { sharedWithClientAt: shared ? Date.now() : undefined });
   },
 });
 
