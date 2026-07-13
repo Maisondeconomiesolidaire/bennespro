@@ -17,24 +17,52 @@ export type BonDepotData = {
   signatureUrl: string | null;
 };
 
-/** Charge une image (URL) en data URL PNG pour l'incorporer au PDF. */
-async function loadImage(url: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+/** Taille maximale autorisée pour un bon de dépôt PDF. */
+const MAX_PDF_BYTES = 3 * 1024 * 1024;
+
+type PreparedImage = { dataUrl: string; format: "PNG" | "JPEG"; width: number; height: number };
+
+/**
+ * Charge une image (URL ou data URL), la redimensionne pour que sa plus grande
+ * dimension ne dépasse pas `maxDimPx`, et la ré-encode. En JPEG l'image est
+ * aplatie sur fond blanc (pas de transparence). Sert à borner le poids du PDF.
+ */
+async function prepareImage(
+  url: string,
+  maxDimPx: number,
+  format: "PNG" | "JPEG" = "PNG",
+  quality = 0.92,
+): Promise<PreparedImage | null> {
   try {
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+    const img = await new Promise<HTMLImageElement | null>((resolve) => {
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = url;
     });
-    const dims = await new Promise<{ width: number; height: number }>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.width, height: img.height });
-      img.onerror = () => resolve({ width: 1, height: 1 });
-      img.src = dataUrl;
-    });
-    return { dataUrl, ...dims };
+    if (!img) return null;
+
+    const natW = img.naturalWidth || img.width || 1;
+    const natH = img.naturalHeight || img.height || 1;
+    const scale = Math.min(1, maxDimPx / Math.max(natW, natH));
+    const w = Math.max(1, Math.round(natW * scale));
+    const h = Math.max(1, Math.round(natH * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    if (format === "JPEG") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+    }
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const dataUrl =
+      format === "JPEG" ? canvas.toDataURL("image/jpeg", quality) : canvas.toDataURL("image/png");
+    return { dataUrl, format, width: w, height: h };
   } catch {
     return null;
   }
@@ -56,18 +84,49 @@ const MUTED = { r: 110, g: 120, b: 114 };
 
 /** Génère et télécharge le bon de dépôt PDF (A4). */
 export async function generateBonDepotPdf(data: BonDepotData): Promise<void> {
-  const doc = await buildBonDepotDoc(data);
+  const doc = await buildWithinSizeLimit(data);
   doc.save(`bon-depot-${String(data.depotNumber).padStart(4, "0")}.pdf`);
 }
 
 /** Génère le bon de dépôt et le renvoie en base64 (pièce jointe email). */
 export async function generateBonDepotPdfBase64(data: BonDepotData): Promise<string> {
-  const doc = await buildBonDepotDoc(data);
+  const doc = await buildWithinSizeLimit(data);
   return doc.output("datauristring").split(",")[1];
 }
 
+/** Options de rendu des images, resserrées à chaque tentative si le PDF est trop lourd. */
+type BuildOpts = {
+  logoMaxPx: number;
+  sigMaxPx: number; // 0 = ne pas inclure la signature
+  sigFormat: "PNG" | "JPEG";
+  sigQuality: number;
+};
+
+/**
+ * Construit le bon de dépôt en garantissant un poids ≤ 3 Mo : on tente d'abord
+ * un rendu de qualité (signature PNG), puis on dégrade progressivement la
+ * compression des images tant que le fichier dépasse la limite, jusqu'à retirer
+ * la signature en dernier recours.
+ */
+async function buildWithinSizeLimit(data: BonDepotData): Promise<jsPDF> {
+  const attempts: BuildOpts[] = [
+    { logoMaxPx: 320, sigMaxPx: 600, sigFormat: "PNG", sigQuality: 1 },
+    { logoMaxPx: 320, sigMaxPx: 500, sigFormat: "JPEG", sigQuality: 0.7 },
+    { logoMaxPx: 240, sigMaxPx: 400, sigFormat: "JPEG", sigQuality: 0.5 },
+    { logoMaxPx: 200, sigMaxPx: 320, sigFormat: "JPEG", sigQuality: 0.3 },
+    { logoMaxPx: 160, sigMaxPx: 0, sigFormat: "JPEG", sigQuality: 0.3 },
+  ];
+
+  let doc: jsPDF | null = null;
+  for (const opts of attempts) {
+    doc = await buildBonDepotDoc(data, opts);
+    if (doc.output("blob").size <= MAX_PDF_BYTES) return doc;
+  }
+  return doc!; // meilleur effort : dernière tentative (sans signature)
+}
+
 /** Construit le document jsPDF du bon de dépôt (A4). */
-async function buildBonDepotDoc(data: BonDepotData): Promise<jsPDF> {
+async function buildBonDepotDoc(data: BonDepotData, opts: BuildOpts): Promise<jsPDF> {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -75,7 +134,7 @@ async function buildBonDepotDoc(data: BonDepotData): Promise<jsPDF> {
   let y = margin;
 
   // ── En-tête : logo Déchet'Lab + titre ────────────────────────────────────
-  const logo = await loadImage("/logo.png");
+  const logo = await prepareImage("/logo.png", opts.logoMaxPx, "PNG");
   if (logo) {
     const logoH = 26;
     const logoW = (logo.width / logo.height) * logoH;
@@ -242,15 +301,15 @@ async function buildBonDepotDoc(data: BonDepotData): Promise<jsPDF> {
   doc.setTextColor(MUTED.r, MUTED.g, MUTED.b);
   doc.text(`${data.depositorName} — le ${fmtDate(data.createdAt)}`, margin, sigTop + 7);
 
-  if (data.signatureUrl) {
-    const img = await loadImage(data.signatureUrl);
+  if (data.signatureUrl && opts.sigMaxPx > 0) {
+    const img = await prepareImage(data.signatureUrl, opts.sigMaxPx, opts.sigFormat, opts.sigQuality);
     if (img) {
       const maxW = 60;
       const maxH = 26;
       const ratio = Math.min(maxW / img.width, maxH / img.height);
       const w = img.width * ratio;
       const h = img.height * ratio;
-      doc.addImage(img.dataUrl, "PNG", pageW - margin - w, sigTop, w, h);
+      doc.addImage(img.dataUrl, img.format, pageW - margin - w, sigTop, w, h);
     }
   }
 
