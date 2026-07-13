@@ -15,7 +15,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, requireCrmPermission, requireUser } from "./lib";
 import { resendSend, storageImageUrl, type EmailAttachment } from "./emails";
-import { bpBilling, bpMaterial, bpUnit } from "./schema";
+import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
@@ -63,6 +63,8 @@ export const createCompany = mutation({
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
+    companyType: v.optional(bpCompanyType),
+    companyTypeOther: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "bennespro:entreprises", "create");
@@ -83,10 +85,316 @@ export const updateCompany = mutation({
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
+    companyType: v.optional(bpCompanyType),
+    companyTypeOther: v.optional(v.string()),
   },
   handler: async (ctx, { companyId, ...patch }) => {
     await requireCrmPermission(ctx, "bennespro:entreprises", "update");
     await ctx.db.patch(companyId, { ...patch, name: patch.name.trim() });
+  },
+});
+
+/* ─── Documents & messagerie : validateurs & sérialisation ────────────────── */
+
+const bpDocType = v.union(
+  v.literal("kbis"),
+  v.literal("rib"),
+  v.literal("assurance"),
+  v.literal("autre"),
+);
+
+function serializeBpMessage(m: Doc<"bpCompanyMessages">) {
+  return {
+    _id: m._id,
+    senderRole: m.senderRole,
+    senderName: m.senderName,
+    body: m.body,
+    createdAt: m.createdAt,
+    readByClientAt: m.readByClientAt ?? null,
+    readByStaffAt: m.readByStaffAt ?? null,
+  };
+}
+
+/* ─── Espace client (portail public) ──────────────────────────────────────── */
+
+/** Entreprise rattachée au compte client courant (ou null). */
+export const getMyCompany = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireUser(ctx);
+    return await ctx.db
+      .query("bpCompanies")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject))
+      .first();
+  },
+});
+
+/** Résout l'entreprise du client courant (ou lève une erreur). */
+async function requireMyCompany(ctx: QueryCtx | MutationCtx) {
+  const identity = await requireUser(ctx);
+  const company = await ctx.db
+    .query("bpCompanies")
+    .withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject))
+    .first();
+  if (!company) throw new Error("Aucune entreprise associée à ce compte.");
+  return { identity, company };
+}
+
+/** Crée (1re fois) ou met à jour l'entreprise du client courant. */
+export const saveMyCompany = mutation({
+  args: {
+    name: v.string(),
+    siret: v.optional(v.string()),
+    address: v.optional(v.string()),
+    contactName: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    billingEmail: v.optional(v.string()),
+    companyType: v.optional(bpCompanyType),
+    companyTypeOther: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const patch = { ...args, name: args.name.trim() };
+    const existing = await ctx.db
+      .query("bpCompanies")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+      return existing._id;
+    }
+    return await ctx.db.insert("bpCompanies", {
+      ...patch,
+      ownerUserId: identity.subject,
+      contactEmail: args.contactEmail ?? identity.email ?? undefined,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Dépôts de l'entreprise cliente (avec de quoi générer le bon de dépôt + facture). */
+export const listMyDepots = query({
+  args: {},
+  handler: async (ctx) => {
+    const { company } = await requireMyCompany(ctx);
+    const depots = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_company", (q) => q.eq("companyId", company._id))
+      .order("desc")
+      .collect();
+    return Promise.all(
+      depots.map(async (depot) => {
+        const vehicle = await ctx.db.get(depot.vehicleId);
+        const signatureUrl = depot.signature
+          ? await ctx.storage.getUrl(depot.signature)
+          : null;
+        return { ...depot, company, vehicle, signatureUrl };
+      }),
+    );
+  },
+});
+
+/** Documents visibles côté client (ses uploads + docs partagés par le staff). */
+export const listMyDocuments = query({
+  args: {},
+  handler: async (ctx) => {
+    const { company } = await requireMyCompany(ctx);
+    const docs = await ctx.db
+      .query("bpCompanyDocuments")
+      .withIndex("by_company", (q) => q.eq("companyId", company._id))
+      .collect();
+    return Promise.all(
+      docs
+        .filter((d) => d.uploadedByRole === "client" || d.sharedWithClientAt !== undefined)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map(async (d) => ({
+          _id: d._id,
+          name: d.name,
+          docType: d.docType,
+          mimeType: d.mimeType ?? null,
+          uploadedByRole: d.uploadedByRole,
+          createdAt: d.createdAt,
+          url: await ctx.storage.getUrl(d.storageId),
+        })),
+    );
+  },
+});
+
+/** Le client dépose un document (KBIS, RIB…). */
+export const addMyDocument = mutation({
+  args: {
+    storageId: v.id("_storage"),
+    name: v.string(),
+    docType: bpDocType,
+    mimeType: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { company } = await requireMyCompany(ctx);
+    return await ctx.db.insert("bpCompanyDocuments", {
+      companyId: company._id,
+      storageId: args.storageId,
+      name: args.name.trim(),
+      docType: args.docType,
+      mimeType: args.mimeType,
+      uploadedByRole: "client",
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const listMyMessages = query({
+  args: {},
+  handler: async (ctx) => {
+    const { company } = await requireMyCompany(ctx);
+    const msgs = await ctx.db
+      .query("bpCompanyMessages")
+      .withIndex("by_company", (q) => q.eq("companyId", company._id))
+      .collect();
+    return msgs.sort((a, b) => a.createdAt - b.createdAt).map(serializeBpMessage);
+  },
+});
+
+export const sendMyMessage = mutation({
+  args: { body: v.string() },
+  handler: async (ctx, { body }) => {
+    const trimmed = body.trim();
+    if (!trimmed) throw new Error("Message vide.");
+    const { identity, company } = await requireMyCompany(ctx);
+    await ctx.db.insert("bpCompanyMessages", {
+      companyId: company._id,
+      senderRole: "client",
+      senderName: identity.name ?? company.contactName ?? company.name,
+      body: trimmed,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const markMyMessagesRead = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { company } = await requireMyCompany(ctx);
+    const msgs = await ctx.db
+      .query("bpCompanyMessages")
+      .withIndex("by_company", (q) => q.eq("companyId", company._id))
+      .collect();
+    const now = Date.now();
+    await Promise.all(
+      msgs
+        .filter((m) => m.senderRole === "staff" && m.readByClientAt === undefined)
+        .map((m) => ctx.db.patch(m._id, { readByClientAt: now })),
+    );
+  },
+});
+
+/* ─── Documents & messagerie côté CRM (staff) ─────────────────────────────── */
+
+export const listCompanyDocuments = query({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const docs = await ctx.db
+      .query("bpCompanyDocuments")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    return Promise.all(
+      docs
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map(async (d) => ({
+          _id: d._id,
+          name: d.name,
+          docType: d.docType,
+          mimeType: d.mimeType ?? null,
+          uploadedByRole: d.uploadedByRole,
+          sharedWithClientAt: d.sharedWithClientAt ?? null,
+          createdAt: d.createdAt,
+          url: await ctx.storage.getUrl(d.storageId),
+        })),
+    );
+  },
+});
+
+/** Le staff dépose un document destiné au client (partagé immédiatement). */
+export const addCompanyDocument = mutation({
+  args: {
+    companyId: v.id("bpCompanies"),
+    storageId: v.id("_storage"),
+    name: v.string(),
+    docType: bpDocType,
+    mimeType: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    const identity = await requireUser(ctx);
+    return await ctx.db.insert("bpCompanyDocuments", {
+      companyId: args.companyId,
+      storageId: args.storageId,
+      name: args.name.trim(),
+      docType: args.docType,
+      mimeType: args.mimeType,
+      uploadedByRole: "staff",
+      sharedWithClientAt: Date.now(),
+      createdBy: identity.email ?? undefined,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const removeCompanyDocument = mutation({
+  args: { documentId: v.id("bpCompanyDocuments") },
+  handler: async (ctx, { documentId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "delete");
+    const doc = await ctx.db.get(documentId);
+    if (!doc) return;
+    await ctx.storage.delete(doc.storageId);
+    await ctx.db.delete(documentId);
+  },
+});
+
+export const listCompanyMessages = query({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const msgs = await ctx.db
+      .query("bpCompanyMessages")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    return msgs.sort((a, b) => a.createdAt - b.createdAt).map(serializeBpMessage);
+  },
+});
+
+export const sendCompanyMessage = mutation({
+  args: { companyId: v.id("bpCompanies"), body: v.string() },
+  handler: async (ctx, { companyId, body }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    const trimmed = body.trim();
+    if (!trimmed) throw new Error("Message vide.");
+    const identity = await requireUser(ctx);
+    await ctx.db.insert("bpCompanyMessages", {
+      companyId,
+      senderRole: "staff",
+      senderName: identity.name ?? "Déchet'Lab",
+      body: trimmed,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const markCompanyMessagesRead = mutation({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const msgs = await ctx.db
+      .query("bpCompanyMessages")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    const now = Date.now();
+    await Promise.all(
+      msgs
+        .filter((m) => m.senderRole === "client" && m.readByStaffAt === undefined)
+        .map((m) => ctx.db.patch(m._id, { readByStaffAt: now })),
+    );
   },
 });
 

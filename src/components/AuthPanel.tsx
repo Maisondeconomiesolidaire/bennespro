@@ -42,8 +42,8 @@ function readMode(): AuthMode {
   return "choice";
 }
 
-export function AuthPanel() {
-  const targetUrl = `${window.location.pathname}${window.location.search}`;
+export function AuthPanel({ redirectUrl }: { redirectUrl?: string } = {}) {
+  const targetUrl = redirectUrl ?? `${window.location.pathname}${window.location.search}`;
   const signInUrl = `${window.location.pathname}${window.location.search}#sign-in`;
   const signUpUrl = `${window.location.pathname}${window.location.search}#sign-up`;
   const [mode, setMode] = useState<AuthMode>(readMode);

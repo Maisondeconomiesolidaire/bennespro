@@ -1,0 +1,576 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useMutation, useQuery } from "convex/react";
+import {
+  Building2,
+  Download,
+  FileText,
+  MessageSquare,
+  Send,
+  Truck,
+  Upload,
+} from "lucide-react";
+import { api } from "../../../convex/_generated/api";
+import { Field, Input } from "../../components/ui/Field";
+import { Select } from "../../components/ui/Select";
+import { Button } from "../../components/ui/Button";
+import { AddressAutocomplete } from "../../components/ui/AddressAutocomplete";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { FullSpinner } from "../../components/ui/Spinner";
+import { BillingBadge } from "../../components/ui/BillingBadge";
+import { useToast } from "../../components/ui/Toast";
+import { useUpload } from "../../lib/useUpload";
+import { COMPANY_TYPE_OPTIONS, DOC_TYPE_OPTIONS, docTypeLabel, type CompanyType, type DocType } from "../../lib/companyProfile";
+import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
+import { unitLabel } from "../../lib/materials";
+import { cn } from "../../lib/cn";
+
+const CARD = "rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6";
+
+const TABS = [
+  { to: "/compte", label: "Mon entreprise", icon: Building2, end: true },
+  { to: "/compte/depots", label: "Mes dépôts", icon: Truck, end: false },
+  { to: "/compte/documents", label: "Documents", icon: FileText, end: false },
+  { to: "/compte/messagerie", label: "Messagerie", icon: MessageSquare, end: false },
+];
+
+/** Coquille de l'espace client avec les onglets. */
+export function AccountLayout() {
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-6">
+      <h1 className="text-2xl font-black tracking-tight text-zinc-950">Mon espace client</h1>
+      <nav className="mt-5 flex flex-wrap gap-2 border-b border-zinc-200 pb-px">
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <NavLink
+              key={t.to}
+              to={t.to}
+              end={t.end}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-2 rounded-t-xl px-3 py-2.5 text-sm font-semibold transition-colors",
+                  isActive
+                    ? "border-b-2 border-brand-500 text-zinc-950"
+                    : "text-zinc-500 hover:text-zinc-800",
+                )
+              }
+            >
+              <Icon className="h-[18px] w-[18px]" />
+              {t.label}
+            </NavLink>
+          );
+        })}
+      </nav>
+      <div className="mt-6">
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
+/** Invite à compléter le profil quand aucune entreprise n'est encore créée. */
+function NeedsCompany() {
+  const navigate = useNavigate();
+  return (
+    <EmptyState
+      icon={<Building2 className="h-8 w-8" />}
+      title="Complétez d'abord votre entreprise"
+      description="Renseignez les informations de votre entreprise pour accéder à cette section."
+      action={<Button onClick={() => navigate("/compte")}>Renseigner mon entreprise</Button>}
+    />
+  );
+}
+
+/* ─── Onglet « Mon entreprise » ───────────────────────────────────────────── */
+
+type InfoForm = {
+  name: string;
+  siret: string;
+  companyType: CompanyType | "";
+  companyTypeOther: string;
+  address: string;
+  contactPhone: string;
+  contactEmail: string;
+  contactName: string;
+  billingEmail: string;
+};
+
+const EMPTY_INFO: InfoForm = {
+  name: "",
+  siret: "",
+  companyType: "",
+  companyTypeOther: "",
+  address: "",
+  contactPhone: "",
+  contactEmail: "",
+  contactName: "",
+  billingEmail: "",
+};
+
+export function AccountInfo() {
+  const company = useQuery(api.bennespro.getMyCompany, {});
+  const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
+  const save = useMutation(api.bennespro.saveMyCompany);
+  const addDocument = useMutation(api.bennespro.addMyDocument);
+  const upload = useUpload();
+  const toast = useToast();
+
+  const [form, setForm] = useState<InfoForm>(EMPTY_INFO);
+  const [kbisFile, setKbisFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!company) return;
+    setForm({
+      name: company.name ?? "",
+      siret: company.siret ?? "",
+      companyType: company.companyType ?? "",
+      companyTypeOther: company.companyTypeOther ?? "",
+      address: company.address ?? "",
+      contactPhone: company.contactPhone ?? "",
+      contactEmail: company.contactEmail ?? "",
+      contactName: company.contactName ?? "",
+      billingEmail: company.billingEmail ?? "",
+    });
+  }, [company]);
+
+  const existingKbis = useMemo(
+    () => (documents ?? []).filter((d) => d.docType === "kbis"),
+    [documents],
+  );
+
+  function set<K extends keyof InfoForm>(key: K, value: InfoForm[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.name.trim()) {
+      toast.error("Le nom de l'entreprise est obligatoire.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await save({
+        name: form.name.trim(),
+        siret: form.siret.trim() || undefined,
+        companyType: form.companyType || undefined,
+        companyTypeOther:
+          form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
+        address: form.address.trim() || undefined,
+        contactPhone: form.contactPhone.trim() || undefined,
+        contactEmail: form.contactEmail.trim() || undefined,
+        contactName: form.contactName.trim() || undefined,
+        billingEmail: form.billingEmail.trim() || undefined,
+      });
+      if (kbisFile) {
+        const storageId = await upload(kbisFile);
+        await addDocument({
+          storageId,
+          name: kbisFile.name,
+          docType: "kbis",
+          mimeType: kbisFile.type || undefined,
+        });
+        setKbisFile(null);
+        if (fileRef.current) fileRef.current.value = "";
+      }
+      toast.success("Informations enregistrées.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Enregistrement impossible.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (company === undefined) return <FullSpinner label="Chargement…" />;
+
+  return (
+    <form onSubmit={submit} className={cn(CARD, "space-y-5")}>
+      {!company && (
+        <p className="rounded-2xl bg-brand-500/10 px-4 py-3 text-sm font-medium text-brand-700">
+          Bienvenue ! Renseignez les informations de votre entreprise pour finaliser votre inscription.
+        </p>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Nom de l'entreprise" required>
+          <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ex. Dupont BTP" />
+        </Field>
+        <Field label="SIRET">
+          <Input value={form.siret} onChange={(e) => set("siret", e.target.value)} placeholder="123 456 789 00012" />
+        </Field>
+        <Field label="Profil">
+          <Select<CompanyType>
+            value={form.companyType}
+            onChange={(v) => set("companyType", v)}
+            options={COMPANY_TYPE_OPTIONS}
+            placeholder="— Sélectionner —"
+          />
+        </Field>
+        {form.companyType === "autre" ? (
+          <Field label="Précisez">
+            <Input
+              value={form.companyTypeOther}
+              onChange={(e) => set("companyTypeOther", e.target.value)}
+              placeholder="Votre activité"
+            />
+          </Field>
+        ) : (
+          <div className="hidden sm:block" />
+        )}
+        <div className="sm:col-span-2">
+          <Field label="Adresse">
+            <AddressAutocomplete
+              value={form.address}
+              onValueChange={(v) => set("address", v)}
+              onSelect={(a) =>
+                set("address", [a.address, `${a.postalCode} ${a.city}`.trim()].filter(Boolean).join(", "))
+              }
+              placeholder="12 rue des Artisans, 60000 Beauvais"
+            />
+          </Field>
+        </div>
+        <Field label="Téléphone">
+          <Input value={form.contactPhone} onChange={(e) => set("contactPhone", e.target.value)} placeholder="06 12 34 56 78" />
+        </Field>
+        <Field label="Email">
+          <Input type="email" value={form.contactEmail} onChange={(e) => set("contactEmail", e.target.value)} placeholder="contact@entreprise.fr" />
+        </Field>
+        <Field label="Nom et prénom du responsable">
+          <Input value={form.contactName} onChange={(e) => set("contactName", e.target.value)} placeholder="Marie Dupont" />
+        </Field>
+        <Field label="Email de facturation">
+          <Input type="email" value={form.billingEmail} onChange={(e) => set("billingEmail", e.target.value)} placeholder="facturation@entreprise.fr" />
+        </Field>
+      </div>
+
+      <Field label="KBIS ou avis de situation" hint="PDF ou image. Vous pourrez en ajouter d'autres depuis l'onglet Documents.">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,image/*"
+            onChange={(e) => setKbisFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600"
+          />
+        </div>
+        {existingKbis.length > 0 && (
+          <p className="mt-2 text-xs text-zinc-500">
+            {existingKbis.length} document(s) déjà transmis.
+          </p>
+        )}
+      </Field>
+
+      <div className="flex justify-end">
+        <Button type="submit" disabled={saving}>
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/* ─── Onglet « Mes dépôts » ───────────────────────────────────────────────── */
+
+export function AccountDepots() {
+  const company = useQuery(api.bennespro.getMyCompany, {});
+  const depots = useQuery(api.bennespro.listMyDepots, company ? {} : "skip");
+  const toast = useToast();
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  if (company === undefined) return <FullSpinner label="Chargement…" />;
+  if (!company) return <NeedsCompany />;
+  if (depots === undefined) return <FullSpinner label="Chargement des dépôts…" />;
+
+  if (depots.length === 0) {
+    return (
+      <EmptyState
+        icon={<Truck className="h-8 w-8" />}
+        title="Aucun dépôt pour le moment"
+        description="Vos dépôts apparaîtront ici dès qu'ils seront enregistrés par notre équipe."
+      />
+    );
+  }
+
+  async function downloadBon(depot: NonNullable<typeof depots>[number]) {
+    setDownloading(depot._id);
+    try {
+      await generateBonDepotPdf({
+        depotNumber: depot.depotNumber,
+        createdAt: depot.createdAt,
+        depositorName: depot.depositorName,
+        siteRef: depot.siteRef,
+        items: depot.items,
+        comment: depot.comment,
+        company: depot.company,
+        vehicle: depot.vehicle,
+        signatureUrl: depot.signatureUrl,
+      });
+    } catch {
+      toast.error("Impossible de générer le bon de dépôt.");
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {depots.map((depot) => (
+        <div key={depot._id} className={CARD}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-zinc-950">
+                Dépôt n° {String(depot.depotNumber).padStart(4, "0")}
+              </p>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                {new Date(depot.createdAt).toLocaleDateString("fr-FR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                })}
+                {depot.vehicle?.label ? ` · ${depot.vehicle.label}` : ""}
+              </p>
+            </div>
+            {depot.billing ? (
+              <BillingBadge status={depot.billing.status} paymentStatus={depot.billing.paymentStatus} />
+            ) : null}
+          </div>
+
+          <ul className="mt-3 space-y-1 text-sm text-zinc-700">
+            {depot.items.map((item, i) => (
+              <li key={i} className="flex justify-between gap-3">
+                <span>{item.material}</span>
+                <span className="shrink-0 text-zinc-500">
+                  {item.quantity} {unitLabel(item.unit)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => downloadBon(depot)}
+              disabled={downloading === depot._id}
+            >
+              <Download className="mr-1.5 h-4 w-4" />
+              {downloading === depot._id ? "Génération…" : "Bon de dépôt"}
+            </Button>
+            {depot.billing?.stripeInvoiceUrl ? (
+              <a
+                href={depot.billing.stripeInvoiceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+              >
+                <FileText className="h-4 w-4" />
+                Facture DIB
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Onglet « Documents » ────────────────────────────────────────────────── */
+
+export function AccountDocuments() {
+  const company = useQuery(api.bennespro.getMyCompany, {});
+  const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
+  const addDocument = useMutation(api.bennespro.addMyDocument);
+  const upload = useUpload();
+  const toast = useToast();
+
+  const [docType, setDocType] = useState<DocType>("kbis");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  if (company === undefined) return <FullSpinner label="Chargement…" />;
+  if (!company) return <NeedsCompany />;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file) {
+      toast.error("Sélectionnez un fichier.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const storageId = await upload(file);
+      await addDocument({
+        storageId,
+        name: file.name,
+        docType,
+        mimeType: file.type || undefined,
+      });
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+      toast.success("Document transmis.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Envoi impossible.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <form onSubmit={submit} className={cn(CARD, "space-y-4")}>
+        <p className="text-sm font-semibold text-zinc-950">Transmettre un document</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Type de document">
+            <Select<DocType>
+              value={docType}
+              onChange={setDocType}
+              options={DOC_TYPE_OPTIONS}
+            />
+          </Field>
+          <Field label="Fichier">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600"
+            />
+          </Field>
+        </div>
+        <div className="flex justify-end">
+          <Button type="submit" disabled={uploading}>
+            <Upload className="mr-1.5 h-4 w-4" />
+            {uploading ? "Envoi…" : "Envoyer"}
+          </Button>
+        </div>
+      </form>
+
+      {documents === undefined ? (
+        <FullSpinner label="Chargement des documents…" />
+      ) : documents.length === 0 ? (
+        <EmptyState
+          icon={<FileText className="h-8 w-8" />}
+          title="Aucun document"
+          description="Les documents que vous transmettez et ceux que nous partageons apparaîtront ici."
+        />
+      ) : (
+        <div className="space-y-2">
+          {documents.map((doc) => (
+            <a
+              key={doc._id}
+              href={doc.url ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(CARD, "flex items-center gap-3 !p-4 transition hover:bg-zinc-50")}
+            >
+              <FileText className="h-5 w-5 shrink-0 text-zinc-400" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-zinc-950">{doc.name}</p>
+                <p className="text-xs text-zinc-500">
+                  {docTypeLabel(doc.docType)} ·{" "}
+                  {doc.uploadedByRole === "staff" ? "Partagé par Déchet'Lab" : "Transmis par vous"}
+                </p>
+              </div>
+              <Download className="h-4 w-4 shrink-0 text-zinc-400" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Onglet « Messagerie » ───────────────────────────────────────────────── */
+
+export function AccountMessages() {
+  const company = useQuery(api.bennespro.getMyCompany, {});
+  const messages = useQuery(api.bennespro.listMyMessages, company ? {} : "skip");
+  const send = useMutation(api.bennespro.sendMyMessage);
+  const markRead = useMutation(api.bennespro.markMyMessagesRead);
+  const toast = useToast();
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (company && messages && messages.length > 0) void markRead({});
+  }, [company, messages, markRead]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
+
+  if (company === undefined) return <FullSpinner label="Chargement…" />;
+  if (!company) return <NeedsCompany />;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    setSending(true);
+    try {
+      await send({ body: trimmed });
+      setBody("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Envoi impossible.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className={cn(CARD, "flex h-[60vh] flex-col !p-0")}>
+      <div className="flex-1 space-y-3 overflow-y-auto p-5">
+        {messages === undefined ? (
+          <FullSpinner label="Chargement…" />
+        ) : messages.length === 0 ? (
+          <p className="py-10 text-center text-sm text-zinc-500">
+            Aucun message. Écrivez-nous, notre équipe vous répondra ici.
+          </p>
+        ) : (
+          messages.map((m) => (
+            <div
+              key={m._id}
+              className={cn("flex flex-col", m.senderRole === "client" ? "items-end" : "items-start")}
+            >
+              <div
+                className={cn(
+                  "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm",
+                  m.senderRole === "client"
+                    ? "bg-brand-500 text-white"
+                    : "bg-zinc-100 text-zinc-800",
+                )}
+              >
+                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+              </div>
+              <span className="mt-1 px-1 text-[11px] text-zinc-400">
+                {m.senderName} ·{" "}
+                {new Date(m.createdAt).toLocaleString("fr-FR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </div>
+          ))
+        )}
+        <div ref={endRef} />
+      </div>
+      <form onSubmit={submit} className="flex items-center gap-2 border-t border-zinc-200 p-3">
+        <Input
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Votre message…"
+          className="flex-1"
+        />
+        <Button type="submit" disabled={sending || !body.trim()}>
+          <Send className="h-4 w-4" />
+        </Button>
+      </form>
+    </div>
+  );
+}

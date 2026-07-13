@@ -7,7 +7,7 @@ import type { Id } from "../../convex/_generated/dataModel";
  */
 export function companyDepotUrl(companyId: Id<"bpCompanies">): string {
   const appUrl = import.meta.env.VITE_BENNESPRO_URL || window.location.origin;
-  return `${appUrl.replace(/\/$/, "")}/?entreprise=${companyId}`;
+  return `${appUrl.replace(/\/$/, "")}/crm?entreprise=${companyId}`;
 }
 
 /** Génère un QR code en data URL PNG (haute résolution pour l'impression). */

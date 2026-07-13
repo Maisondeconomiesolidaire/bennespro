@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk-react";
-import { AuthPanel } from "./AuthPanel";
-import { AppSwitcher } from "./AppSwitcher";
+import { AuthPanel } from "../AuthPanel";
+import { AppSwitcher } from "../AppSwitcher";
 import { useConvexAuth, useMutation } from "convex/react";
 import {
   Building2,
@@ -15,25 +15,26 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { cn } from "../lib/cn";
-import { AppActionsContext } from "../lib/appActions";
-import type { Id } from "../../convex/_generated/dataModel";
-import { useAccess } from "./RequirePermission";
-import { hasBennesProAccess } from "../lib/permissions";
-import { FullSpinner } from "./ui/Spinner";
-import { NewDepotWizard } from "./NewDepotWizard";
-import { CompanyModal } from "./CompanyModal";
-import { api } from "../../convex/_generated/api";
+import { cn } from "../../lib/cn";
+import { AppActionsContext } from "../../lib/appActions";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { useAccess } from "../RequirePermission";
+import { hasBennesProAccess } from "../../lib/permissions";
+import { FullSpinner } from "../ui/Spinner";
+import { NewDepotWizard } from "../NewDepotWizard";
+import { CompanyModal } from "../CompanyModal";
+import { api } from "../../../convex/_generated/api";
+import { useTheme } from "../../lib/useTheme";
 
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(42,167,155,0.25)]";
 
 const NAV_ITEMS: { to: string; label: string; icon: LucideIcon }[] = [
-  { to: "/", label: "Dépôts", icon: Recycle },
-  { to: "/entreprises", label: "Entreprises", icon: Building2 },
-  { to: "/dib", label: "DIB", icon: Truck },
+  { to: "/crm", label: "Dépôts", icon: Recycle },
+  { to: "/crm/entreprises", label: "Entreprises", icon: Building2 },
+  { to: "/crm/dib", label: "DIB", icon: Truck },
 ];
 
-export function AppLayout() {
+export function CrmLayout() {
   const [theme, setTheme] = useTheme();
 
   return (
@@ -114,7 +115,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // QR code scanné avec l'appareil photo : `/?entreprise=<id>` ouvre
+  // QR code scanné avec l'appareil photo : `/crm?entreprise=<id>` ouvre
   // directement un nouveau dépôt avec l'entreprise présélectionnée.
   useEffect(() => {
     const companyParam = searchParams.get("entreprise");
@@ -146,9 +147,14 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           <BrandLogo className="mx-auto" />
           <h1 className="mt-6 text-xl font-semibold text-[var(--foreground)]">Accès non autorisé</h1>
           <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            Votre compte n'a pas encore accès à Bennes & Pro. Demandez à un administrateur de vous attribuer le droit depuis Mes Outils.
+            Votre compte n'a pas encore accès au CRM Bennes & Pro. Demandez à un administrateur de vous attribuer le droit depuis Mes Outils.
           </p>
-          <div className="mt-6 flex justify-center"><UserButton afterSignOutUrl="/" /></div>
+          <div className="mt-6 flex flex-col items-center gap-3">
+            <Link to="/" className="text-sm font-semibold text-brand-600 hover:underline">
+              Retour à mon espace client
+            </Link>
+            <UserButton afterSignOutUrl="/" />
+          </div>
         </div>
       </div>
     );
@@ -181,7 +187,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           >
             <Menu className="h-5 w-5" />
           </button>
-          <Link to="/"><BrandLogo compact /></Link>
+          <Link to="/crm"><BrandLogo compact /></Link>
           <div className="ml-auto flex items-center gap-1">
             <AppSwitcher current="bennespro" />
           </div>
@@ -240,19 +246,19 @@ function SidebarContent({
   return (
     <>
       <div className="flex h-16 items-center justify-between gap-2 border-b border-[var(--border)] px-5">
-        <Link to="/"><BrandLogo /></Link>
+        <Link to="/crm"><BrandLogo /></Link>
         <AppSwitcher current="bennespro" />
       </div>
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = currentPath === item.to || (item.to !== "/" && currentPath.startsWith(item.to));
+          const active = currentPath === item.to || (item.to !== "/crm" && currentPath.startsWith(item.to));
           return (
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/"}
+              end={item.to === "/crm"}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
@@ -278,7 +284,7 @@ function SidebarContent({
         </button>
         <div className="flex items-center gap-1.5">
           <Link
-            to="/compte"
+            to="/crm/compte"
             className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:brightness-95"
           >
             <UserAvatar name={userName} src={userImage} />
@@ -338,21 +344,4 @@ function ThemeToggle({ theme, onToggle }: { theme: "light" | "dark"; onToggle: (
       {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
   );
-}
-
-function useTheme() {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    if (typeof window === "undefined") return "light";
-    const stored = window.localStorage.getItem("bennespro-theme");
-    if (stored === "light" || stored === "dark") return stored;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  });
-
-  useEffect(() => {
-    document.body.classList.remove("theme-light", "theme-dark");
-    document.body.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
-    window.localStorage.setItem("bennespro-theme", theme);
-  }, [theme]);
-
-  return [theme, setTheme] as const;
 }
