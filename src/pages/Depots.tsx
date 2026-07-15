@@ -87,7 +87,7 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
           { key: "dib", label: "DIB & facturation", icon: Recycle },
         ]}
         value={dibOnly ? "dib" : "all"}
-        onChange={(key) => navigate(key === "dib" ? "/dib" : "/")}
+        onChange={(key) => navigate(key === "dib" ? "/crm/dib" : "/crm")}
       />
 
       {/* ── Prix du DIB (identique sur les deux onglets) ─────────────────────── */}
