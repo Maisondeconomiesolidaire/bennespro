@@ -20,7 +20,7 @@ import { cn } from "../../lib/cn";
 import { AppActionsContext } from "../../lib/appActions";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useAccess } from "../RequirePermission";
-import { hasBennesProAccess } from "../../lib/permissions";
+import { canAccess, hasBennesProAccess, PAGE_DEPOTS, PAGE_ENTREPRISES } from "../../lib/permissions";
 import { FullSpinner } from "../ui/Spinner";
 import { NewDepotWizard } from "../NewDepotWizard";
 import { CompanyModal } from "../CompanyModal";
@@ -29,11 +29,16 @@ import { useTheme } from "../../lib/useTheme";
 
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(42,167,155,0.25)]";
 
-const NAV_ITEMS: { to: string; label: string; icon: LucideIcon }[] = [
-  { to: "/crm", label: "Dépôts", icon: Recycle },
-  { to: "/crm/entreprises", label: "Entreprises", icon: Building2 },
-  { to: "/crm/messagerie", label: "Messagerie", icon: MessageSquare },
-  { to: "/crm/dib", label: "DIB", icon: Truck },
+const NAV_ITEMS: Array<{
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  pageKey?: string;
+}> = [
+  { to: "/crm", label: "Dépôts", icon: Recycle, pageKey: PAGE_DEPOTS },
+  { to: "/crm/entreprises", label: "Entreprises", icon: Building2, pageKey: PAGE_ENTREPRISES },
+  { to: "/crm/messagerie", label: "Messagerie", icon: MessageSquare, pageKey: PAGE_ENTREPRISES },
+  { to: "/crm/dib", label: "DIB", icon: Truck, pageKey: PAGE_DEPOTS },
 ];
 
 export function CrmLayout() {
@@ -162,8 +167,11 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     );
   }
 
+  const navItems = NAV_ITEMS.filter((item) => !item.pageKey || canAccess(access, item.pageKey, "read"));
+
   const sidebar = (
     <SidebarContent
+      navItems={navItems}
       theme={theme}
       setTheme={setTheme}
       currentPath={location.pathname}
@@ -231,6 +239,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
 }
 
 function SidebarContent({
+  navItems,
   theme,
   setTheme,
   currentPath,
@@ -238,6 +247,7 @@ function SidebarContent({
   userEmail,
   userImage,
 }: {
+  navItems: typeof NAV_ITEMS;
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   currentPath: string;
@@ -253,7 +263,7 @@ function SidebarContent({
       </div>
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           const active = currentPath === item.to || (item.to !== "/crm" && currentPath.startsWith(item.to));
           return (
