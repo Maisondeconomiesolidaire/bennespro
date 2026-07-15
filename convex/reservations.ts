@@ -1,9 +1,10 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { action, env, internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import {
+  accessAllows,
   clerkIdForEmail,
   emailForClerkId,
   hasCrmPermission,
@@ -141,6 +142,10 @@ async function lastRecordedMileageForVehicle(
   return reservationMileage;
 }
 
+function feedbackMileageRecordedAt(reservation: Doc<"vehicleReservations">) {
+  return reservation.feedbackSubmittedAt ?? reservation.end ?? reservation.start ?? reservation._creationTime;
+}
+
 export const listRooms = query({
   args: {},
   handler: async (ctx) => {
@@ -250,34 +255,79 @@ async function resolveReservationTarget(
   };
 }
 
-export const listReservationDirectory = query({
+type ClerkDirectoryUser = {
+  id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  image_url?: string | null;
+  primary_email_address_id?: string | null;
+  email_addresses?: Array<{ id?: string; email_address?: string }>;
+};
+
+function clerkPrimaryEmail(user: ClerkDirectoryUser): string {
+  const emails = Array.isArray(user.email_addresses) ? user.email_addresses : [];
+  const primary = emails.find((entry) => entry.id === user.primary_email_address_id) ?? emails[0];
+  return (primary?.email_address ?? "").trim().toLowerCase();
+}
+
+/**
+ * Annuaire « Réserver pour » : liste directement les utilisateurs de l'instance
+ * Clerk PRODUCTION (via l'API Backend, `CLERK_SECRET_KEY` = clé prod) plutôt que
+ * la table `users` Convex (qui peut contenir d'anciens comptes dev). On renvoie
+ * les membres internes (@eco-solidaire.fr) avec leur clerkId PROD, hors soi-même.
+ */
+export const listReservationDirectory = action({
   args: {},
   handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
-    const identity = await requireUser(ctx);
-    await requireCrmPermission(ctx, PAGE_KEY, "create");
-    const selfEmail = (identity.email ?? "").trim().toLowerCase();
-    const users = await ctx.db.query("users").collect();
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, PAGE_KEY, "create")) {
+      throw new Error("Accès insuffisant pour réserver pour un collègue.");
+    }
+    const secret = env.CLERK_SECRET_KEY;
+    if (!secret) return [];
+    const selfEmail = (access.email ?? "").trim().toLowerCase();
+
+    const result: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
     const seen = new Set<string>();
-    return users
-      .filter((user) => {
-        const email = user.email.trim().toLowerCase();
-        // Uniquement les membres internes (adresse @eco-solidaire.fr).
-        if (!email.endsWith("@eco-solidaire.fr")) return false;
-        // On s'exclut soi-même (« Réserver pour → Moi-même » gère ce cas). On
-        // compare aussi par email : le clerkId peut différer de la session à
-        // cause des artefacts de migration Clerk dev/prod.
-        if (user.clerkId === identity.subject) return false;
-        if (selfEmail && email === selfEmail) return false;
-        if (seen.has(user.clerkId)) return false;
-        seen.add(user.clerkId);
-        return true;
-      })
-      .map((user) => ({
-        clerkId: user.clerkId,
-        name: userDisplayName(user) ?? user.clerkId,
-        imageUrl: user.imageUrl ?? null,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    const pageSize = 100;
+    for (let offset = 0; ; ) {
+      const url = new URL("https://api.clerk.com/v1/users");
+      url.searchParams.set("limit", String(pageSize));
+      url.searchParams.set("offset", String(offset));
+      url.searchParams.set("order_by", "last_name");
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      });
+      if (!response.ok) break;
+      const payload = (await response.json()) as unknown;
+      const rawUsers: ClerkDirectoryUser[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray((payload as { data?: unknown }).data)
+          ? ((payload as { data: ClerkDirectoryUser[] }).data)
+          : [];
+
+      for (const user of rawUsers) {
+        const clerkId = typeof user.id === "string" ? user.id : "";
+        if (!clerkId) continue;
+        const email = clerkPrimaryEmail(user);
+        // Membres internes uniquement.
+        if (!email.endsWith("@eco-solidaire.fr")) continue;
+        if (selfEmail && email === selfEmail) continue;
+        if (seen.has(clerkId)) continue;
+        seen.add(clerkId);
+        const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email;
+        result.push({
+          clerkId,
+          name,
+          imageUrl: typeof user.image_url === "string" ? user.image_url : null,
+        });
+      }
+
+      if (rawUsers.length < pageSize) break;
+      offset += rawUsers.length;
+    }
+
+    return result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
 
@@ -847,22 +897,43 @@ export const listVehicleRemarks = query({
           .collect()
       : await ctx.db.query("vehicleReservations").order("desc").take(300);
     const reservations = raw.filter((r) => r.feedbackSubmittedAt);
-    const vehicles = await ctx.db.query("vehicles").collect();
+    const [vehicles, mileageSource] = await Promise.all([
+      ctx.db.query("vehicles").collect(),
+      vehicleId ? Promise.resolve(raw) : ctx.db.query("vehicleReservations").collect(),
+    ]);
     const byId = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
-    const lastMileageByVehicleId = new Map(
-      vehicles.map((vehicle) => [String(vehicle._id), vehicle.odometerKm]),
-    );
-    for (const reservation of raw) {
+    const mileageHistoryByVehicleId = new Map<
+      string,
+      Array<{ id: string; recordedAt: number; mileage: number }>
+    >();
+    for (const reservation of mileageSource) {
       if (typeof reservation.feedbackMileage !== "number" || !Number.isFinite(reservation.feedbackMileage)) {
         continue;
       }
       const key = String(reservation.vehicleId);
-      const current = lastMileageByVehicleId.get(key);
-      lastMileageByVehicleId.set(
-        key,
-        typeof current === "number" ? Math.max(current, reservation.feedbackMileage) : reservation.feedbackMileage,
-      );
+      const history = mileageHistoryByVehicleId.get(key) ?? [];
+      history.push({
+        id: String(reservation._id),
+        recordedAt: feedbackMileageRecordedAt(reservation),
+        mileage: reservation.feedbackMileage,
+      });
+      mileageHistoryByVehicleId.set(key, history);
     }
+    for (const history of mileageHistoryByVehicleId.values()) {
+      history.sort((a, b) => a.recordedAt - b.recordedAt);
+    }
+
+    const previousMileageForReservation = (reservation: Doc<"vehicleReservations">) => {
+      const history = mileageHistoryByVehicleId.get(String(reservation.vehicleId)) ?? [];
+      const reservationId = String(reservation._id);
+      const recordedAt = feedbackMileageRecordedAt(reservation);
+      let previous: number | undefined;
+      for (const entry of history) {
+        if (entry.recordedAt > recordedAt) break;
+        if (entry.id !== reservationId) previous = entry.mileage;
+      }
+      return previous;
+    };
 
     return await Promise.all(
       reservations
@@ -881,7 +952,7 @@ export const listVehicleRemarks = query({
             end: r.end,
             submittedAt: r.feedbackSubmittedAt ?? 0,
             mileage: r.feedbackMileage,
-            lastRecordedMileage: lastMileageByVehicleId.get(String(r.vehicleId)),
+            lastRecordedMileage: previousMileageForReservation(r),
             fuelRestored: r.feedbackFuelRestored,
             vehicleEmpty: r.feedbackVehicleEmpty,
             vehicleClean: r.feedbackVehicleClean,
