@@ -207,6 +207,11 @@ type InfoForm = {
   billingEmail: string;
 };
 
+type VehicleForm = {
+  label: string;
+  plate: string;
+};
+
 const EMPTY_INFO: InfoForm = {
   name: "",
   siret: "",
@@ -219,17 +224,26 @@ const EMPTY_INFO: InfoForm = {
   billingEmail: "",
 };
 
+const EMPTY_VEHICLE: VehicleForm = {
+  label: "",
+  plate: "",
+};
+
 export function AccountInfo() {
   const company = useQuery(api.bennespro.getMyCompany, {});
+  const vehicles = useQuery(api.bennesproClientVehicles.listMyVehicles, company ? {} : "skip");
   const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
   const save = useMutation(api.bennespro.saveMyCompany);
+  const addVehicle = useMutation(api.bennesproClientVehicles.addMyVehicle);
   const addDocument = useMutation(api.bennespro.addMyDocument);
   const upload = useUpload();
   const toast = useToast();
 
   const [form, setForm] = useState<InfoForm>(EMPTY_INFO);
+  const [vehicleForm, setVehicleForm] = useState<VehicleForm>(EMPTY_VEHICLE);
   const [kbisFile, setKbisFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [addingVehicle, setAddingVehicle] = useState(false);
 
   useEffect(() => {
     if (!company) return;
@@ -253,6 +267,10 @@ export function AccountInfo() {
 
   function set<K extends keyof InfoForm>(key: K, value: InfoForm[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function setVehicle<K extends keyof VehicleForm>(key: K, value: VehicleForm[K]) {
+    setVehicleForm((prev) => ({ ...prev, [key]: value }));
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -290,6 +308,31 @@ export function AccountInfo() {
       toast.error(err instanceof Error ? err.message : "Enregistrement impossible.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitVehicle(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!company) {
+      toast.error("Renseignez d'abord votre entreprise.");
+      return;
+    }
+    if (!vehicleForm.label.trim()) {
+      toast.error("Le nom du véhicule est obligatoire.");
+      return;
+    }
+    setAddingVehicle(true);
+    try {
+      await addVehicle({
+        label: vehicleForm.label.trim(),
+        plate: vehicleForm.plate.trim() || undefined,
+      });
+      setVehicleForm(EMPTY_VEHICLE);
+      toast.success("Véhicule ajouté.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Ajout impossible.");
+    } finally {
+      setAddingVehicle(false);
     }
   }
 
@@ -362,6 +405,67 @@ export function AccountInfo() {
           </p>
         )}
       </Field>
+
+      {company ? (
+        <div className="space-y-4 rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4">
+          <div className="flex items-center gap-2">
+            <Truck className="h-5 w-5 text-zinc-700" />
+            <div>
+              <h2 className="text-sm font-bold text-zinc-950">Mes véhicules</h2>
+              <p className="text-xs text-zinc-500">
+                Ajoutez les véhicules de votre entreprise pour les retrouver sur vos dépôts.
+              </p>
+            </div>
+          </div>
+
+          {vehicles === undefined ? (
+            <FullSpinner label="Chargement des véhicules…" />
+          ) : vehicles.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-5 text-sm text-zinc-500">
+              Aucun véhicule enregistré pour le moment.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {vehicles.map((vehicle) => (
+                <div
+                  key={vehicle._id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-950">{vehicle.label}</p>
+                    <p className="text-xs text-zinc-500">
+                      {vehicle.plate?.trim() ? `Immatriculation : ${vehicle.plate}` : "Immatriculation non renseignée"}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={submitVehicle} className="grid gap-3 rounded-2xl border border-zinc-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_220px_auto]">
+            <Field label="Nom du véhicule" required>
+              <Input
+                value={vehicleForm.label}
+                onChange={(e) => setVehicle("label", e.target.value)}
+                placeholder="Ex. Camion benne 3,5T"
+              />
+            </Field>
+            <Field label="Immatriculation">
+              <Input
+                value={vehicleForm.plate}
+                onChange={(e) => setVehicle("plate", e.target.value.toUpperCase())}
+                placeholder="AA-123-BB"
+              />
+            </Field>
+            <div className="flex items-end">
+              <Button type="submit" disabled={addingVehicle} className="w-full sm:w-auto">
+                <Plus className="h-4 w-4" />
+                {addingVehicle ? "Ajout…" : "Ajouter"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
