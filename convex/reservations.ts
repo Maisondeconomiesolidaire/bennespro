@@ -7,7 +7,9 @@ import {
   accessAllows,
   clerkIdForEmail,
   emailForClerkId,
+  fetchInternalClerkDirectory,
   hasCrmPermission,
+  isReservationParticipant,
   photoForClerkId,
   requireCrmPermission,
   requireUser,
@@ -255,26 +257,13 @@ async function resolveReservationTarget(
   };
 }
 
-type ClerkDirectoryUser = {
-  id?: string;
-  first_name?: string | null;
-  last_name?: string | null;
-  image_url?: string | null;
-  primary_email_address_id?: string | null;
-  email_addresses?: Array<{ id?: string; email_address?: string }>;
-};
-
-function clerkPrimaryEmail(user: ClerkDirectoryUser): string {
-  const emails = Array.isArray(user.email_addresses) ? user.email_addresses : [];
-  const primary = emails.find((entry) => entry.id === user.primary_email_address_id) ?? emails[0];
-  return (primary?.email_address ?? "").trim().toLowerCase();
-}
-
 /**
- * Annuaire « Réserver pour » : liste directement les utilisateurs de l'instance
- * Clerk PRODUCTION (via l'API Backend, `CLERK_SECRET_KEY` = clé prod) plutôt que
- * la table `users` Convex (qui peut contenir d'anciens comptes dev). On renvoie
- * les membres internes (@eco-solidaire.fr) avec leur clerkId PROD, hors soi-même.
+ * Annuaire « Réserver pour » : uniquement les membres internes
+ * (@eco-solidaire.fr) de l'instance Clerk PRODUCTION, lus via l'API Backend
+ * (`CLERK_SECRET_KEY`), hors soi-même. On n'utilise pas la table `users` Convex :
+ * elle ne contient que les comptes déjà connectés et peut garder d'anciens
+ * comptes dev. Si Clerk est injoignable on remonte l'erreur plutôt que
+ * d'afficher un annuaire faux ou vide.
  */
 export const listReservationDirectory = action({
   args: {},
@@ -284,50 +273,8 @@ export const listReservationDirectory = action({
       throw new Error("Accès insuffisant pour réserver pour un collègue.");
     }
     const secret = env.CLERK_SECRET_KEY;
-    if (!secret) return [];
-    const selfEmail = (access.email ?? "").trim().toLowerCase();
-
-    const result: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
-    const seen = new Set<string>();
-    const pageSize = 100;
-    for (let offset = 0; ; ) {
-      const url = new URL("https://api.clerk.com/v1/users");
-      url.searchParams.set("limit", String(pageSize));
-      url.searchParams.set("offset", String(offset));
-      url.searchParams.set("order_by", "last_name");
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-      });
-      if (!response.ok) break;
-      const payload = (await response.json()) as unknown;
-      const rawUsers: ClerkDirectoryUser[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray((payload as { data?: unknown }).data)
-          ? ((payload as { data: ClerkDirectoryUser[] }).data)
-          : [];
-
-      for (const user of rawUsers) {
-        const clerkId = typeof user.id === "string" ? user.id : "";
-        if (!clerkId) continue;
-        const email = clerkPrimaryEmail(user);
-        // Membres internes uniquement.
-        if (!email.endsWith("@eco-solidaire.fr")) continue;
-        if (selfEmail && email === selfEmail) continue;
-        if (seen.has(clerkId)) continue;
-        seen.add(clerkId);
-        const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email;
-        result.push({
-          clerkId,
-          name,
-          imageUrl: typeof user.image_url === "string" ? user.image_url : null,
-        });
-      }
-
-      if (rawUsers.length < pageSize) break;
-      offset += rawUsers.length;
-    }
-
-    return result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    if (!secret) throw new Error("Annuaire indisponible : CLERK_SECRET_KEY manquante.");
+    return await fetchInternalClerkDirectory(secret, access.email ?? "");
   },
 });
 
@@ -447,7 +394,7 @@ export const cancelRoomReservation = mutation({
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const isManager = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (reservation.clerkId !== identity.subject && !isManager) {
+    if (!isReservationParticipant(reservation, identity.subject) && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
     const room = await ctx.db.get(reservation.roomId);
@@ -621,6 +568,7 @@ export const listVehicleBookings = query({
         _id: reservation._id,
         vehicleName: nameById.get(String(reservation.vehicleId)) ?? "Véhicule",
         clerkId: reservation.clerkId,
+        bookedForClerkId: reservation.bookedForClerkId,
         userName: reservation.userName,
         purpose: reservation.purpose,
         usageType: reservation.usageType,
@@ -740,8 +688,7 @@ export const submitVehicleFeedback = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) throw new Error("Réservation introuvable.");
-    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
-    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+    if (!isReservationParticipant(reservation, identity.subject)) {
       throw new Error("Retour non autorisé.");
     }
     if (reservation.status !== "approved") {
@@ -829,8 +776,7 @@ export const submitRoomFeedback = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) throw new Error("Réservation introuvable.");
-    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
-    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+    if (!isReservationParticipant(reservation, identity.subject)) {
       throw new Error("Retour non autorisé.");
     }
     if (reservation.end > Date.now()) {
@@ -1436,7 +1382,7 @@ export const cancelVehicleReservation = mutation({
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const canManage = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (reservation.clerkId !== identity.subject && !canManage) {
+    if (!isReservationParticipant(reservation, identity.subject) && !canManage) {
       throw new Error("Annulation non autorisée.");
     }
     const vehicle = await ctx.db.get(reservation.vehicleId);

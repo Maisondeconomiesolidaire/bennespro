@@ -115,6 +115,7 @@ export const deleteEmployee = mutation({
 
 const clientFields = {
   name: v.string(),
+  clientType: v.optional(v.union(v.literal("interne"), v.literal("externe"))),
   contactName: v.optional(v.string()),
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
@@ -208,15 +209,52 @@ export const listProjects = query({
       [INVOICES_PAGE_KEY, "read"],
       [INVOICES_PAGE_KEY, "create"],
     ]);
-    const projects = await ctx.db.query("ptProjects").order("desc").collect();
-    const clients = await ctx.db.query("ptClients").collect();
-    const nameById = new Map(clients.map((c) => [c._id, c.name]));
+    const [projects, clients, entries] = await Promise.all([
+      ctx.db.query("ptProjects").order("desc").collect(),
+      ctx.db.query("ptClients").collect(),
+      ctx.db.query("ptTimeEntries").collect(),
+    ]);
+    const clientById = new Map(clients.map((c) => [c._id, c]));
+    const totalsByProject = new Map<
+      string,
+      { entriesCount: number; totalPointed: number; billedPointed: number; toBillPointed: number }
+    >();
+    for (const entry of entries) {
+      const current = totalsByProject.get(entry.projectId) ?? {
+        entriesCount: 0,
+        totalPointed: 0,
+        billedPointed: 0,
+        toBillPointed: 0,
+      };
+      current.entriesCount += 1;
+      current.totalPointed += entry.totalCost;
+      if ((entry.billingStatus ?? "a_facturer") === "facture") {
+        current.billedPointed += entry.totalCost;
+      } else {
+        current.toBillPointed += entry.totalCost;
+      }
+      totalsByProject.set(entry.projectId, current);
+    }
+
     return projects
-      .map((p) => ({
-        ...p,
-        clientName: nameById.get(p.clientId) ?? "—",
-        travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
-      }))
+      .map((p) => {
+        const totals = totalsByProject.get(p._id) ?? {
+          entriesCount: 0,
+          totalPointed: 0,
+          billedPointed: 0,
+          toBillPointed: 0,
+        };
+        return {
+          ...p,
+          clientName: clientById.get(p.clientId)?.name ?? "—",
+          clientType: clientById.get(p.clientId)?.clientType,
+          travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
+          entriesCount: totals.entriesCount,
+          totalPointed: round2(totals.totalPointed),
+          billedPointed: round2(totals.billedPointed),
+          toBillPointed: round2(totals.toBillPointed),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
@@ -722,6 +760,7 @@ export const registerDocument = mutation({
       ),
     ),
     projectId: v.id("ptProjects"),
+    supplierId: v.optional(v.id("ptSuppliers")),
   },
   handler: async (ctx, args) => {
     await requireAnyCrmPermission(ctx, [
@@ -739,6 +778,7 @@ export const registerDocument = mutation({
       mimeType: args.mimeType,
       kind: args.kind ?? "other",
       projectId: args.projectId,
+      supplierId: args.supplierId,
       uploadedAt: Date.now(),
       uploadedBy: identity.email ?? undefined,
     });
@@ -848,6 +888,16 @@ export const clientSummary = query({
         entriesCount: projectEntries.length,
         totalPointed: round2(
           projectEntries.reduce((sum, entry) => sum + entry.totalCost, 0),
+        ),
+        billedPointed: round2(
+          projectEntries
+            .filter((entry) => (entry.billingStatus ?? "a_facturer") === "facture")
+            .reduce((sum, entry) => sum + entry.totalCost, 0),
+        ),
+        toBillPointed: round2(
+          projectEntries
+            .filter((entry) => (entry.billingStatus ?? "a_facturer") !== "facture")
+            .reduce((sum, entry) => sum + entry.totalCost, 0),
         ),
         invoiced: round2(
           projectInvoices.reduce((sum, invoice) => sum + invoice.amount, 0),
