@@ -130,51 +130,69 @@ function RequiredActions() {
         <h2 className="text-sm font-bold">Actions requises</h2>
       </div>
       <p className="mt-1 text-sm text-amber-800/80">
-        Merci de signer et de nous transmettre les documents obligatoires suivants.
+        Pour chaque document : <strong>1.</strong> téléchargez-le, signez-le, puis{" "}
+        <strong>2.</strong> importez la version signée.
       </p>
       <div className="mt-4 space-y-2.5">
-        {statuses.map((s) => (
-          <div
-            key={s.type}
-            className="flex flex-col gap-2 rounded-2xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-zinc-950">{s.label}</p>
-              <a
-                href={s.template}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Télécharger le document à signer
-              </a>
+        {statuses.map((s) => {
+          const validated = s.status === "validated";
+          const pending = s.status === "pending";
+          return (
+            <div key={s.type} className="rounded-2xl bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-zinc-950">{s.label}</p>
+                {validated ? (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold text-brand-700">
+                    <Check className="h-3.5 w-3.5" /> Validé
+                  </span>
+                ) : pending ? (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                    <Clock className="h-3.5 w-3.5" /> En attente de validation
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Deux actions distinctes, côte à côte : télécharger le vierge à
+                  signer, puis importer la version signée. Le bouton d'import
+                  reste proposé tant que ce n'est pas validé, pour permettre de
+                  renvoyer une version corrigée. */}
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(s.template, "_blank", "noopener")}
+                  className="w-full sm:w-auto"
+                >
+                  <Download className="h-4 w-4" /> Télécharger le document
+                </Button>
+
+                {!validated ? (
+                  <label
+                    className={cn(
+                      "inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white shadow-[0_8px_18px_rgba(42,167,155,0.22)] transition hover:bg-brand-600 sm:w-auto",
+                      "h-9",
+                      busy === s.type && "pointer-events-none opacity-70",
+                    )}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {busy === s.type
+                      ? "Envoi…"
+                      : pending
+                        ? "Réimporter le document signé"
+                        : "Importer le document signé"}
+                    <input
+                      type="file"
+                      accept="application/pdf,image/*"
+                      className="hidden"
+                      disabled={busy === s.type}
+                      onChange={(e) => uploadSigned(s.type, e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                ) : null}
+              </div>
             </div>
-            <div className="shrink-0">
-              {s.status === "validated" ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1.5 text-xs font-semibold text-brand-700">
-                  <Check className="h-3.5 w-3.5" /> Validé
-                </span>
-              ) : s.status === "pending" ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-700">
-                  <Clock className="h-3.5 w-3.5" /> En attente de validation
-                </span>
-              ) : (
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-600">
-                  <Upload className="h-3.5 w-3.5" />
-                  {busy === s.type ? "Envoi…" : "Envoyer le document signé"}
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    className="hidden"
-                    disabled={busy === s.type}
-                    onChange={(e) => uploadSigned(s.type, e.target.files?.[0] ?? null)}
-                  />
-                </label>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
