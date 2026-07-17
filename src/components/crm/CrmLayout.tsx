@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-route
 import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { AuthPanel } from "../AuthPanel";
 import { AppSwitcher } from "../AppSwitcher";
+import { HelpButton } from "../HelpButton";
 import { useConvexAuth, useMutation } from "convex/react";
 import {
   Building2,
@@ -224,6 +225,8 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           <Outlet />
         </main>
       </div>
+
+      <HelpButton />
 
       <NewDepotWizard
         open={depotOpen}
