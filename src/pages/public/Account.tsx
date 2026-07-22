@@ -862,11 +862,6 @@ const DOCUMENTS: { label: string; description: string; file: string }[] = [
     file: "/dechets-acceptes.pdf",
   },
   {
-    label: "Protocole de sécurité",
-    description: "Règles de sécurité à respecter lors de vos dépôts.",
-    file: "/protocole-de-securite.pdf",
-  },
-  {
     label: "Savoir décrypter un vélux",
     description: "Guide d'identification et de reprise des menuiseries de type vélux.",
     file: "/savoir-decrypter-un-velux.pdf",
