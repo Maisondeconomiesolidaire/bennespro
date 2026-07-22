@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "convex/react";
 import {
   AlertTriangle,
+  BookOpen,
   Building2,
   Check,
   Clock,
@@ -13,6 +14,7 @@ import {
   Send,
   Truck,
   Upload,
+  X,
 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { Field, Input } from "../../components/ui/Field";
@@ -35,6 +37,7 @@ const CARD = "rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6";
 const TABS = [
   { to: "/compte", label: "Mon entreprise", icon: Building2, end: true },
   { to: "/compte/depots", label: "Mes dépôts", icon: Truck, end: false },
+  { to: "/compte/documentation", label: "Documentation", icon: BookOpen, end: false },
   { to: "/compte/documents", label: "Documents", icon: FileText, end: false },
   { to: "/compte/messagerie", label: "Messagerie", icon: MessageSquare, end: false },
 ];
@@ -811,6 +814,141 @@ export function AccountMessages() {
           <Send className="h-4 w-4" />
         </Button>
       </form>
+    </div>
+  );
+}
+
+/* ─── Onglet « Documentation et informations importantes » ────────────────── */
+
+/** Flux de reprise acceptés par Déchèt'Lab (avec précision optionnelle). */
+const ACCEPTED_FLOWS: { name: string; note?: string; highlight?: boolean }[] = [
+  { name: "Tout venant", note: "DIB non triés" },
+  { name: "CSR", note: "déchets combustibles" },
+  { name: "Plastiques", note: "rigides & PVC" },
+  { name: "Bois" },
+  { name: "Menuiseries vitrées" },
+  { name: "Inertes", note: "gravats" },
+  { name: "Plâtres" },
+  { name: "Métaux" },
+  { name: "Laine de roche" },
+  { name: "Laine de verre" },
+  { name: "Matériaux de réemploi", highlight: true },
+];
+
+/** Flux non acceptés (à ne pas apporter sur le site). */
+const REFUSED_FLOWS: string[] = [
+  "Acide",
+  "Biodéchets",
+  "Déchets phytosanitaires",
+  "Seringue Dasri",
+  "Explosifs",
+  "Batterie, pile",
+  "Déchets organiques",
+  "Amiante",
+  "Déchets alimentaires",
+  "Déchets verts",
+  "Souche de bois",
+  "Carburants et huiles",
+  "Déchets radioactifs",
+  "Bombonnes, fûts",
+];
+
+/** Règles d'accès (conditions et modalités de dépôt). */
+const ACCESS_RULES: string[] = [
+  "Je trie mes déchets de préférence avant de venir.",
+  "Je viens obligatoirement avec la carte d'accès au nom de mon entreprise et du véhicule enregistré.",
+  "J'applique les conseils de l'agent.",
+  "Je peux accéder à la déchèterie avec un véhicule d'un gabarit de moins de 20 m³ et dont le PTAC est inférieur ou égal à 3,5 t.",
+  "Je respecte les consignes de circulation, de stationnement, de déchargement et de tri des PMCB, transmises par les agents de l'association et affichées sur le site.",
+];
+
+export function AccountDocumentation() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+        <AlertTriangle className="h-5 w-5 shrink-0" />
+        <p>Pour déclarer vos dépôts, utilisez l'application ValoDépôt pour tout type de dépôt.</p>
+      </div>
+
+      {/* Flux de reprise acceptés */}
+      <section className={CARD}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+            <Check className="h-5 w-5" />
+          </span>
+          <h2 className="text-lg font-black tracking-tight text-zinc-950">Flux de reprise acceptés</h2>
+        </div>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {ACCEPTED_FLOWS.map((flow) => (
+            <li
+              key={flow.name}
+              className={cn(
+                "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm",
+                flow.highlight
+                  ? "border-emerald-300 bg-emerald-50"
+                  : "border-zinc-200 bg-zinc-50",
+              )}
+            >
+              <Check className={cn("h-4 w-4 shrink-0", flow.highlight ? "text-emerald-600" : "text-emerald-500")} />
+              <span className="font-semibold text-zinc-800">
+                {flow.name}
+                {flow.note ? <span className="font-normal text-zinc-500"> — {flow.note}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Flux non acceptés */}
+      <section className={CARD}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-red-100 text-red-600">
+            <X className="h-5 w-5" />
+          </span>
+          <h2 className="text-lg font-black tracking-tight text-zinc-950">Flux non acceptés</h2>
+        </div>
+        <p className="mb-3 text-sm text-zinc-500">
+          Ces déchets ne sont pas repris sur le site. Merci de les orienter vers une filière adaptée.
+        </p>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {REFUSED_FLOWS.map((name) => (
+            <li
+              key={name}
+              className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50/60 px-3 py-2.5 text-sm"
+            >
+              <X className="h-4 w-4 shrink-0 text-red-500" />
+              <span className="font-semibold text-zinc-800">{name}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Conditions et modalités de dépôt — Règles d'accès */}
+      <section className={CARD}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+            <BookOpen className="h-5 w-5" />
+          </span>
+          <h2 className="text-lg font-black tracking-tight text-zinc-950">
+            Conditions et modalités de dépôt
+          </h2>
+        </div>
+        <p className="text-sm leading-relaxed text-zinc-600">
+          Déchèt'Lab propose un service adapté aux besoins des artisans et entreprises :
+        </p>
+        <ul className="mt-3 space-y-2.5">
+          {ACCESS_RULES.map((rule) => (
+            <li key={rule} className="flex items-start gap-2.5 text-sm text-zinc-800">
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+              <span>{rule}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-4 space-y-2 border-t border-zinc-200 pt-4 text-sm leading-relaxed text-zinc-600">
+          <p>Chaque entreprise dispose d'une carte d'accès nominative, liée à ses véhicules.</p>
+          <p>Les passages sont enregistrés et facturés en fonction des volumes de DIB déposés.</p>
+        </div>
+      </section>
     </div>
   );
 }

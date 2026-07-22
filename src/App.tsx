@@ -17,6 +17,7 @@ import {
   AccountDepots,
   AccountDocuments,
   AccountMessages,
+  AccountDocumentation,
 } from "./pages/public/Account";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 
@@ -39,6 +40,7 @@ export default function App() {
           >
             <Route index element={<AccountInfo />} />
             <Route path="depots" element={<AccountDepots />} />
+            <Route path="documentation" element={<AccountDocumentation />} />
             <Route path="documents" element={<AccountDocuments />} />
             <Route path="messagerie" element={<AccountMessages />} />
           </Route>
