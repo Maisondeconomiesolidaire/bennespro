@@ -1,4 +1,5 @@
 import { action, internalQuery, mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -151,6 +152,23 @@ function normalizePrice(value?: number | null) {
 function normalizeQuantity(value?: number) {
   if (!value || Number.isNaN(value) || value < 1) return 1;
   return Math.floor(value);
+}
+
+/**
+ * Génère une référence interne unique (6 chiffres) pour un article Klyd.
+ * Même principe que la réf. interne de la boutique recyclerie : on tire au
+ * hasard jusqu'à tomber sur une référence libre (vérifiée via l'index by_sku).
+ */
+async function generateKlydeReference(ctx: MutationCtx): Promise<string> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const candidate = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+    const existing = await ctx.db
+      .query("klydeItems")
+      .withIndex("by_sku", (q) => q.eq("sku", candidate))
+      .first();
+    if (!existing) return candidate;
+  }
+  throw new Error("Impossible de générer une référence unique.");
 }
 
 function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
@@ -478,14 +496,29 @@ export const create = mutation({
     style: v.optional(v.string()),
     location: v.optional(v.string()),
     sku: v.optional(v.string()),
+    vinted: v.optional(v.boolean()),
     quantity: v.optional(v.number()),
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
+    // Publier directement l'annonce sur la boutique à la création.
+    publishOnline: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "create");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
+    // Mise en ligne immédiate : mêmes droits que updateStatus("en_ligne").
+    if (args.publishOnline) {
+      await requireAnyCrmPermission(ctx, [
+        ["klyde:boutique", "manage"],
+        ["klyde:stock", "update"],
+      ]);
+      if (normalizePrice(args.price) == null) {
+        throw new Error("Renseignez un prix pour mettre l'article en ligne.");
+      }
+    }
     const now = Date.now();
+    // Référence auto si l'utilisateur n'en a pas saisi.
+    const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
     return await ctx.db.insert("klydeItems", {
       photos: args.photos,
       title: args.title.trim() || "Article textile",
@@ -502,9 +535,10 @@ export const create = mutation({
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
-      sku: cleanOptional(args.sku),
+      sku,
+      vinted: args.vinted ? true : undefined,
       quantity: normalizeQuantity(args.quantity),
-      status: "stock",
+      status: args.publishOnline ? "en_ligne" : "stock",
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
       createdAt: now,
@@ -565,6 +599,7 @@ export const update = mutation({
     style: v.optional(v.string()),
     location: v.optional(v.string()),
     sku: v.optional(v.string()),
+    vinted: v.optional(v.boolean()),
     quantity: v.optional(v.number()),
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
@@ -572,6 +607,8 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "update");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
+    // On complète la référence si elle manque encore (articles antérieurs).
+    const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
     await ctx.db.patch(args.id, {
       photos: args.photos,
       title: args.title.trim() || "Article textile",
@@ -588,7 +625,8 @@ export const update = mutation({
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
-      sku: cleanOptional(args.sku),
+      sku,
+      vinted: args.vinted ? true : undefined,
       quantity: normalizeQuantity(args.quantity),
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
@@ -703,5 +741,162 @@ ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim
     });
 
     return sanitizeAnalysis(result);
+  },
+});
+
+/**
+ * Lance une prédiction FASHN et attend son résultat (polling), en renvoyant
+ * l'URL de l'image générée. Chaque étape « quality » prend ~1 min.
+ */
+async function runFashnPrediction(
+  apiKey: string,
+  modelName: string,
+  inputs: Record<string, unknown>,
+): Promise<string> {
+  const runResponse = await fetch("https://api.fashn.ai/v1/run", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model_name: modelName, inputs }),
+  });
+  if (!runResponse.ok) {
+    const errorText = await runResponse.text();
+    throw new Error(`Erreur FASHN (${runResponse.status}): ${errorText.slice(0, 300)}`);
+  }
+  const runData = (await runResponse.json()) as { id?: string; error?: unknown };
+  if (runData.error || !runData.id) {
+    throw new Error(`FASHN: ${JSON.stringify(runData.error ?? "réponse invalide").slice(0, 300)}`);
+  }
+
+  const deadline = Date.now() + 150_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const statusResponse = await fetch(`https://api.fashn.ai/v1/status/${runData.id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!statusResponse.ok) continue;
+    const statusData = (await statusResponse.json()) as {
+      status?: string;
+      output?: string[];
+      error?: unknown;
+    };
+    if (statusData.status === "completed") {
+      const output = statusData.output?.[0];
+      if (!output) throw new Error("FASHN n'a renvoyé aucune image.");
+      return output;
+    }
+    if (statusData.status === "failed" || statusData.error) {
+      throw new Error(
+        `Génération FASHN échouée: ${JSON.stringify(statusData.error ?? "inconnue").slice(0, 300)}`,
+      );
+    }
+  }
+  throw new Error("Génération FASHN expirée, réessayez.");
+}
+
+/**
+ * Prompt de « mise en scène » : garde le mannequin et le vêtement principal
+ * intacts, puis ajoute des accessoires/pièces complémentaires assortis et un
+ * environnement/contexte sur mesure correspondant à l'univers du vêtement.
+ */
+function buildStylingPrompt(garment?: {
+  category?: string;
+  subcategory?: string;
+  gender?: string;
+  style?: string;
+  color?: string;
+  brand?: string;
+}): string {
+  const descriptors = [
+    cleanOptional(garment?.subcategory) ?? cleanOptional(garment?.category),
+    cleanOptional(garment?.style),
+    cleanOptional(garment?.color),
+    cleanOptional(garment?.brand),
+  ].filter(Boolean);
+  const garmentDesc = descriptors.length ? ` (${descriptors.join(", ")})` : "";
+
+  return (
+    `Keep the same person, face, body, pose and the main worn garment${garmentDesc} exactly the same. ` +
+    `Style the look by adding tasteful, complementary fashion accessories and additional clothing pieces ` +
+    `(such as shoes, bag, jewelry, layers) that match the garment's style and colours. ` +
+    `Replace the background with a bespoke environment and context that fits the garment's universe: ` +
+    `choose the setting, location, season, lighting, colours and mood that best tell its story. ` +
+    `Be creative and vary the scene (studio, outdoor, urban, nature, stylish interior), ` +
+    `keeping it coherent with the style. High-end editorial lookbook / brand e-commerce rendering, photorealistic.`
+  );
+}
+
+/**
+ * Essayage FASHN en deux temps : (1) Try-On Max place l'article sur le
+ * mannequin (image) choisi par l'utilisateur — le mannequin est conservé ;
+ * (2) un passage `edit` ajoute des accessoires/pièces complémentaires assortis
+ * et génère un environnement/contexte sur mesure. Un seed aléatoire varie la
+ * mise en scène à chaque fois. L'image finale est stockée dans Convex.
+ */
+export const generateTryOn = action({
+  args: {
+    storageId: v.id("_storage"),
+    // Image du mannequin choisi (asset public de l'app Klyd), URL absolue.
+    modelImageUrl: v.string(),
+    // Qualité/résolution de sortie FASHN (défaut: 2k).
+    resolution: v.optional(v.union(v.literal("1k"), v.literal("2k"), v.literal("4k"))),
+    // Attributs de l'article pour orienter accessoires et contexte générés.
+    garment: v.optional(
+      v.object({
+        category: v.optional(v.string()),
+        subcategory: v.optional(v.string()),
+        gender: v.optional(v.string()),
+        style: v.optional(v.string()),
+        color: v.optional(v.string()),
+        brand: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, { storageId, modelImageUrl, resolution, garment }) => {
+    await ctx.runQuery(internal.klyde.assertCanAnalyze, {});
+
+    const apiKey = process.env.FASHN_API_KEY;
+    if (!apiKey) {
+      throw new Error("Clé FASHN absente du déploiement Convex partagé.");
+    }
+    if (!/^https?:\/\//i.test(modelImageUrl)) {
+      throw new Error("Image du mannequin invalide.");
+    }
+    const outputResolution = resolution ?? "2k";
+
+    const productUrl = await ctx.storage.getUrl(storageId);
+    if (!productUrl) throw new Error("Photo introuvable dans le stockage Convex.");
+
+    // 1) Try-On Max : l'article porté par le mannequin choisi (mannequin conservé).
+    const tryOnUrl = await runFashnPrediction(apiKey, "tryon-max", {
+      product_image: productUrl,
+      model_image: modelImageUrl,
+      resolution: outputResolution,
+      generation_mode: "quality",
+      output_format: "png",
+      num_images: 1,
+    });
+
+    // 2) Mise en scène : accessoires/pièces complémentaires + contexte sur mesure.
+    const resultUrl = await runFashnPrediction(apiKey, "edit", {
+      image: tryOnUrl,
+      prompt: buildStylingPrompt(garment),
+      resolution: outputResolution,
+      generation_mode: "quality",
+      output_format: "png",
+      num_images: 1,
+      // Seed aléatoire : une mise en scène différente à chaque génération.
+      seed: Math.floor(Math.random() * 2_147_483_647),
+    });
+
+    // 3) Téléchargement et stockage de l'image générée dans Convex.
+    const imageResponse = await fetch(resultUrl);
+    if (!imageResponse.ok) throw new Error("Image générée par FASHN inaccessible.");
+    const blob = await imageResponse.blob();
+    const newStorageId = await ctx.storage.store(blob);
+    const url = await ctx.storage.getUrl(newStorageId);
+    return { storageId: newStorageId, url };
   },
 });

@@ -51,6 +51,12 @@ export function AccountLayout() {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-6">
       <h1 className="text-2xl font-black tracking-tight text-zinc-950">Mon espace client</h1>
+      <div className="mt-4 flex items-center gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+        <AlertTriangle className="h-5 w-5 shrink-0" />
+        <p>
+          Pour déclarer vos dépôts, utilisez l'application ValoDépôt pour tout type de dépôt.
+        </p>
+      </div>
       <RequiredActions />
       <nav className="mt-5 flex flex-wrap gap-2 border-b border-zinc-200 pb-px">
         {TABS.map((t) => {
@@ -688,6 +694,26 @@ export function AccountDocuments() {
 
 /* ─── Onglet « Messagerie » ───────────────────────────────────────────────── */
 
+/** Pastille photo de profil (ou initiales) d'un expéditeur de message. */
+function MessageAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-500 text-[11px] font-semibold text-white">
+      {imageUrl ? (
+        <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        initials || "?"
+      )}
+    </span>
+  );
+}
+
 export function AccountMessages() {
   const company = useQuery(api.bennespro.getMyCompany, {});
   const messages = useQuery(api.bennespro.listMyMessages, company ? {} : "skip");
@@ -737,27 +763,38 @@ export function AccountMessages() {
           messages.map((m) => (
             <div
               key={m._id}
-              className={cn("flex flex-col", m.senderRole === "client" ? "items-end" : "items-start")}
+              className={cn(
+                "flex items-end gap-2",
+                m.senderRole === "client" ? "flex-row-reverse" : "flex-row",
+              )}
             >
+              <MessageAvatar name={m.senderName} imageUrl={m.senderImageUrl} />
               <div
                 className={cn(
-                  "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm",
-                  m.senderRole === "client"
-                    ? "bg-brand-500 text-white"
-                    : "bg-zinc-100 text-zinc-800",
+                  "flex min-w-0 max-w-[80%] flex-col",
+                  m.senderRole === "client" ? "items-end" : "items-start",
                 )}
               >
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                <div
+                  className={cn(
+                    "max-w-full rounded-2xl px-4 py-2.5 text-sm",
+                    m.senderRole === "client"
+                      ? "bg-brand-500 text-white"
+                      : "bg-zinc-100 text-zinc-800",
+                  )}
+                >
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                </div>
+                <span className="mt-1 px-1 text-[11px] text-zinc-400">
+                  {m.senderName} ·{" "}
+                  {new Date(m.createdAt).toLocaleString("fr-FR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
               </div>
-              <span className="mt-1 px-1 text-[11px] text-zinc-400">
-                {m.senderName} ·{" "}
-                {new Date(m.createdAt).toLocaleString("fr-FR", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
             </div>
           ))
         )}

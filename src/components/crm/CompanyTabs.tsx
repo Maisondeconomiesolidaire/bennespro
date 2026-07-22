@@ -260,6 +260,26 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
 
 /* ─── Onglet Messagerie (staff) ───────────────────────────────────────────── */
 
+/** Pastille photo de profil (ou initiales) d'un expéditeur de message. */
+function MessageAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-500 text-[11px] font-semibold text-white">
+      {imageUrl ? (
+        <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        initials || "?"
+      )}
+    </span>
+  );
+}
+
 export function CompanyMessagesTab({ companyId }: { companyId: Id<"bpCompanies"> }) {
   const messages = useQuery(api.bennespro.listCompanyMessages, { companyId });
   const send = useMutation(api.bennespro.sendCompanyMessage);
@@ -303,24 +323,33 @@ export function CompanyMessagesTab({ companyId }: { companyId: Id<"bpCompanies">
           </p>
         ) : (
           messages.map((m) => (
-            <div key={m._id} className={cn("flex flex-col", m.senderRole === "staff" ? "items-end" : "items-start")}>
-              <div
-                className={cn(
-                  "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm",
-                  m.senderRole === "staff" ? "bg-brand-500 text-white" : "bg-[var(--accent)] text-[var(--foreground)]",
-                )}
-              >
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+            <div
+              key={m._id}
+              className={cn(
+                "flex items-end gap-2",
+                m.senderRole === "staff" ? "flex-row-reverse" : "flex-row",
+              )}
+            >
+              <MessageAvatar name={m.senderName} imageUrl={m.senderImageUrl} />
+              <div className={cn("flex min-w-0 max-w-[80%] flex-col", m.senderRole === "staff" ? "items-end" : "items-start")}>
+                <div
+                  className={cn(
+                    "max-w-full rounded-2xl px-4 py-2.5 text-sm",
+                    m.senderRole === "staff" ? "bg-brand-500 text-white" : "bg-[var(--accent)] text-[var(--foreground)]",
+                  )}
+                >
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                </div>
+                <span className="mt-1 px-1 text-[11px] text-[var(--muted-foreground)]">
+                  {m.senderName} ·{" "}
+                  {new Date(m.createdAt).toLocaleString("fr-FR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
               </div>
-              <span className="mt-1 px-1 text-[11px] text-[var(--muted-foreground)]">
-                {m.senderName} ·{" "}
-                {new Date(m.createdAt).toLocaleString("fr-FR", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
             </div>
           ))
         )}
