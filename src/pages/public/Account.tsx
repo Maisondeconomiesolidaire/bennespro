@@ -853,6 +853,30 @@ const REFUSED_FLOWS: string[] = [
   "Bombonnes, fûts",
 ];
 
+/** Documents à télécharger (PDF servis depuis /public). */
+const DOCUMENTS: { label: string; description: string; file: string }[] = [
+  {
+    label: "DDS — Déchets Diffus Spécifiques",
+    description: "Liste et consignes de tri des déchets diffus spécifiques.",
+    file: "/DDS.pdf",
+  },
+  {
+    label: "Déchets acceptés",
+    description: "Détail des flux de reprise acceptés sur le site.",
+    file: "/dechets-acceptes.pdf",
+  },
+  {
+    label: "Protocole de sécurité",
+    description: "Règles de sécurité à respecter lors de vos dépôts.",
+    file: "/protocole-de-securite.pdf",
+  },
+  {
+    label: "Savoir décrypter un vélux",
+    description: "Guide d'identification et de reprise des menuiseries de type vélux.",
+    file: "/savoir-decrypter-un-velux.pdf",
+  },
+];
+
 /** Règles d'accès (conditions et modalités de dépôt). */
 const ACCESS_RULES: string[] = [
   "Je trie mes déchets de préférence avant de venir.",
@@ -943,6 +967,37 @@ export function AccountDocumentation() {
           <p>Chaque entreprise dispose d'une carte d'accès nominative, liée à ses véhicules.</p>
           <p>Les passages sont enregistrés et facturés en fonction des volumes de DIB déposés.</p>
         </div>
+      </section>
+
+      {/* Documents à télécharger */}
+      <section className={CARD}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+            <FileText className="h-5 w-5" />
+          </span>
+          <h2 className="text-lg font-black tracking-tight text-zinc-950">Documents à télécharger</h2>
+        </div>
+        <ul className="space-y-2.5">
+          {DOCUMENTS.map((doc) => (
+            <li key={doc.file}>
+              <a
+                href={doc.file}
+                target="_blank"
+                rel="noreferrer"
+                className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:border-brand-300 hover:bg-brand-50"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm">
+                  <FileText className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-zinc-900">{doc.label}</span>
+                  <span className="block text-xs text-zinc-500">{doc.description}</span>
+                </span>
+                <Download className="h-5 w-5 shrink-0 text-zinc-400 transition group-hover:text-brand-600" />
+              </a>
+            </li>
+          ))}
+        </ul>
       </section>
     </div>
   );
