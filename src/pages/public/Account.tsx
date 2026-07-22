@@ -29,7 +29,7 @@ import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
 import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
-import { unitLabel } from "../../lib/materials";
+import { unitLabel, MATERIALS, ECODDS_SUBMATERIALS } from "../../lib/materials";
 import { cn } from "../../lib/cn";
 
 const CARD = "rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6";
@@ -820,19 +820,15 @@ export function AccountMessages() {
 
 /* ─── Onglet « Documentation et informations importantes » ────────────────── */
 
-/** Flux de reprise acceptés par Déchèt'Lab (avec précision optionnelle). */
+/**
+ * Flux de reprise acceptés par Déchèt'Lab.
+ * Source de vérité = la liste des matériaux déposables du CRM
+ * (`MATERIALS` + le groupe ECODDS), pour rester aligné avec le
+ * formulaire « nouveau dépôt ».
+ */
 const ACCEPTED_FLOWS: { name: string; note?: string }[] = [
-  { name: "Tout venant", note: "DIB non triés" },
-  { name: "CSR", note: "déchets combustibles" },
-  { name: "Plastiques", note: "rigides & PVC" },
-  { name: "Bois" },
-  { name: "Menuiseries vitrées" },
-  { name: "Inertes", note: "gravats" },
-  { name: "Plâtres" },
-  { name: "Métaux" },
-  { name: "Laine de roche" },
-  { name: "Laine de verre" },
-  { name: "Matériaux de réemploi" },
+  ...MATERIALS.map((name) => ({ name })),
+  { name: "ECODDS", note: `déchets diffus spécifiques — ${ECODDS_SUBMATERIALS.length} sous-catégories` },
 ];
 
 /** Flux non acceptés (à ne pas apporter sur le site). */
