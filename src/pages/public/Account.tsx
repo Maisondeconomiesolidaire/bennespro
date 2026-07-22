@@ -821,7 +821,7 @@ export function AccountMessages() {
 /* ─── Onglet « Documentation et informations importantes » ────────────────── */
 
 /** Flux de reprise acceptés par Déchèt'Lab (avec précision optionnelle). */
-const ACCEPTED_FLOWS: { name: string; note?: string; highlight?: boolean }[] = [
+const ACCEPTED_FLOWS: { name: string; note?: string }[] = [
   { name: "Tout venant", note: "DIB non triés" },
   { name: "CSR", note: "déchets combustibles" },
   { name: "Plastiques", note: "rigides & PVC" },
@@ -832,7 +832,7 @@ const ACCEPTED_FLOWS: { name: string; note?: string; highlight?: boolean }[] = [
   { name: "Métaux" },
   { name: "Laine de roche" },
   { name: "Laine de verre" },
-  { name: "Matériaux de réemploi", highlight: true },
+  { name: "Matériaux de réemploi" },
 ];
 
 /** Flux non acceptés (à ne pas apporter sur le site). */
@@ -882,14 +882,9 @@ export function AccountDocumentation() {
           {ACCEPTED_FLOWS.map((flow) => (
             <li
               key={flow.name}
-              className={cn(
-                "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm",
-                flow.highlight
-                  ? "border-emerald-300 bg-emerald-50"
-                  : "border-zinc-200 bg-zinc-50",
-              )}
+              className="flex items-center gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm"
             >
-              <Check className={cn("h-4 w-4 shrink-0", flow.highlight ? "text-emerald-600" : "text-emerald-500")} />
+              <Check className="h-4 w-4 shrink-0 text-emerald-500" />
               <span className="font-semibold text-zinc-800">
                 {flow.name}
                 {flow.note ? <span className="font-normal text-zinc-500"> — {flow.note}</span> : null}
