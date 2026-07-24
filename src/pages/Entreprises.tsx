@@ -346,7 +346,7 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
     if (!depot.billing) return sum;
     return sum + Math.round(depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100));
   }, 0);
-  const dibKg = depots.reduce((sum, depot) => sum + (depot.billing?.weightKg ?? 0), 0);
+  const billableKg = depots.reduce((sum, depot) => sum + (depot.billing?.weightKg ?? 0), 0);
 
   if (depots.length === 0) {
     return (
@@ -363,7 +363,7 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <SummaryStat icon={Euro} label="Total payé" value={EUR.format(totalPaidCents / 100)} />
         <SummaryStat icon={Receipt} label="Total facturé" value={EUR.format(totalInvoicedCents / 100)} />
-        <SummaryStat icon={Truck} label="DIB facturé" value={`${QTY.format(dibKg)} kg`} />
+        <SummaryStat icon={Truck} label="Poids facturé" value={`${QTY.format(billableKg)} kg`} />
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-[var(--border)]">

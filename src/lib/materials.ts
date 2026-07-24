@@ -34,6 +34,7 @@ export const ECODDS_SUBMATERIALS: Material[] = [
 ];
 
 export const DIB_MATERIAL: Material = "Tout venant/DIB non triés";
+export const WOOD_MATERIAL: Material = "Bois";
 export const DEEE_MATERIAL: Material = "DEEE";
 
 export const UNITS: { value: Unit; label: string }[] = [

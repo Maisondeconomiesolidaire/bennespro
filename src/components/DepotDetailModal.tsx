@@ -100,7 +100,7 @@ export function DepotDetailModal({
               <Info label="Date" value={new Date(depot.createdAt).toLocaleString("fr-FR")} />
               {depot.billing ? (
                 <div className="sm:col-span-2">
-                  <p className="text-xs text-[var(--muted-foreground)]">Facturation DIB ({depot.billing.weightKg} kg)</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">Facturation ({depot.billing.weightKg} kg)</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <BillingBadge
                       status={depot.billing.status}

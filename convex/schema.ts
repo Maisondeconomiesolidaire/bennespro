@@ -94,14 +94,24 @@ export const bpUnit = v.union(
   v.literal("unite"),
 );
 
-/** App « Bennes & Pro » — facturation Stripe du DIB d'un dépôt. */
+/** Une ligne de matière facturée sur une facture Stripe Bennes & Pro. */
+export const bpBillingLine = v.object({
+  material: bpMaterial,
+  weightKg: v.number(),
+  priceCentsPerKg: v.number(),
+  amountCents: v.number(),
+});
+
+/** App « Bennes & Pro » — facturation Stripe des matières payantes d'un dépôt. */
 export const bpBilling = v.object({
-  /** Poids DIB facturable en kg (lignes kg + tonnes converties). */
+  /** Poids total facturable en kg (lignes kg + tonnes converties). */
   weightKg: v.number(),
   /** Prix appliqué, en centimes d'euro par kg (HT). */
   priceCentsPerKg: v.number(),
   /** Montant HT en centimes d'euro (la TVA est ajoutée sur la facture Stripe). */
   amountCents: v.number(),
+  /** Détail par matière, conservé pour éditer exactement les lignes Stripe. */
+  items: v.optional(v.array(bpBillingLine)),
   /** Taux de TVA appliqué (ex. 20). Les anciens dépôts sans valeur sont affichés au taux courant. */
   vatRate: v.optional(v.number()),
   status: v.union(

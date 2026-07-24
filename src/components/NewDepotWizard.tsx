@@ -16,6 +16,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { useUpload } from "../lib/useUpload";
 import {
   DIB_MATERIAL,
+  WOOD_MATERIAL,
   ECODDS_SUBMATERIALS,
   MATERIALS,
   UNITS,
@@ -368,7 +369,7 @@ export function NewDepotWizard({
                   className="flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-center text-sm font-medium text-[var(--foreground)] transition hover:border-brand-400 hover:bg-[var(--accent)]"
                 >
                   {m}
-                  {m === DIB_MATERIAL ? (
+                  {m === DIB_MATERIAL || m === WOOD_MATERIAL ? (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
                       Facturé au kg
                     </span>
@@ -411,7 +412,7 @@ export function NewDepotWizard({
               </div>
             ) : null}
             <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-              Seul le tout-venant / DIB non triés est facturé (au poids). Les autres flux sont gratuits.
+              Le tout-venant / DIB non trié et le bois sont facturés au poids. Les autres flux sont gratuits.
             </p>
           </div>
 
@@ -511,9 +512,9 @@ export function NewDepotWizard({
           <p className="mt-1 max-w-md text-sm text-[var(--muted-foreground)]">
             Le dépôt a bien été enregistré. Vous pouvez générer le bon de dépôt au format PDF.
           </p>
-          {saved?.items.some((it) => it.material === DIB_MATERIAL) ? (
+          {saved?.items.some((it) => it.material === DIB_MATERIAL || it.material === WOOD_MATERIAL) ? (
             <p className="mt-2 max-w-md rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">
-              Ce dépôt contient du DIB : la facture Stripe est émise automatiquement (suivi dans l'onglet
+              Ce dépôt contient une matière facturable : la facture Stripe est émise automatiquement (suivi dans l'onglet
               « DIB & facturation »).
             </p>
           ) : null}

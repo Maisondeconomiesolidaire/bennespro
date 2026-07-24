@@ -4,7 +4,7 @@ import type { FunctionReturnType } from "convex/server";
 import { CalendarDays, Euro, ExternalLink, Mail, Receipt, RefreshCw, Scale, Wallet } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { DIB_MATERIAL, type DepotItem } from "../lib/materials";
+import { DIB_MATERIAL, WOOD_MATERIAL, type DepotItem } from "../lib/materials";
 import { generateBonDepotPdfBase64 } from "../lib/bonDepotPdf";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
@@ -31,15 +31,28 @@ function formatReminder(ts: number): string {
   });
 }
 
-/** Poids DIB facturable (kg + tonnes ; m³/unités non facturables). */
-export function dibWeightKg(items: DepotItem[]): number {
+/** Poids facturable (DIB + bois, kg et tonnes ; m³/unités non facturables). */
+export function billableWeightKg(items: DepotItem[]): number {
   let kg = 0;
   for (const it of items) {
-    if (it.material !== DIB_MATERIAL) continue;
+    if (it.material !== DIB_MATERIAL && it.material !== WOOD_MATERIAL) continue;
     if (it.unit === "kg") kg += it.quantity;
     else if (it.unit === "tonne") kg += it.quantity * 1000;
   }
   return Math.round(kg * 100) / 100;
+}
+
+function estimatedAmountCents(
+  items: DepotItem[],
+  dibPriceCentsPerKg: number,
+  woodPriceCentsPerKg: number,
+): number {
+  return Math.round(items.reduce((sum, item) => {
+    const kg = item.unit === "kg" ? item.quantity : item.unit === "tonne" ? item.quantity * 1000 : 0;
+    if (item.material === DIB_MATERIAL) return sum + kg * dibPriceCentsPerKg;
+    if (item.material === WOOD_MATERIAL) return sum + kg * woodPriceCentsPerKg;
+    return sum;
+  }, 0));
 }
 
 /** Montant TTC (centimes) à partir du HT et du taux de TVA. */
@@ -47,14 +60,14 @@ function ttcCents(amountCents: number, vatRate = 20): number {
   return Math.round(amountCents * (1 + vatRate / 100));
 }
 
-/** Cartes de statistiques (facturation DIB) — partagées Dépôts / DIB. */
+/** Cartes de statistiques des matières payantes — partagées Dépôts / DIB. */
 export function DepotStats({ depots, countLabel }: { depots: DepotListItem[]; countLabel: string }) {
-  let dibKg = 0;
+  let billableKg = 0;
   let invoicedTtc = 0;
   let pendingTtc = 0;
   let paidTtc = 0;
   for (const d of depots) {
-    dibKg += dibWeightKg(d.items);
+    billableKg += billableWeightKg(d.items);
     const b = d.billing;
     if (b && b.status === "invoiced") {
       const ttc = ttcCents(b.amountCents, b.vatRate ?? 20);
@@ -66,7 +79,7 @@ export function DepotStats({ depots, countLabel }: { depots: DepotListItem[]; co
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatCard icon={CalendarDays} label={countLabel} value={String(depots.length)} />
-      <StatCard icon={Scale} label="Poids DIB total" value={`${KG.format(dibKg)} kg`} />
+      <StatCard icon={Scale} label="Poids facturable total" value={`${KG.format(billableKg)} kg`} />
       <StatCard icon={Euro} label="Total facturé (TTC)" value={EUR.format(invoicedTtc / 100)} />
       <StatCard icon={Wallet} label="En attente (TTC)" value={EUR.format(pendingTtc / 100)} tone={pendingTtc > 0 ? "amber" : "default"} />
     </div>
@@ -121,6 +134,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
   const [refreshingId, setRefreshingId] = useState<Id<"bpDepots"> | null>(null);
 
   const priceCentsPerKg = settings?.priceCentsPerKg ?? null;
+  const woodPriceCentsPerKg = settings?.woodPriceCentsPerKg ?? null;
 
   async function handleBill(depotId: Id<"bpDepots">) {
     setBillingId(depotId);
@@ -183,7 +197,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
 
   /** Actions de facturation d'une ligne (réutilisées bureau + mobile). */
   function actions(d: DepotListItem): ReactNode {
-    const weight = d.billing?.weightKg ?? dibWeightKg(d.items);
+    const weight = d.billing?.weightKg ?? billableWeightKg(d.items);
     const canBill = weight > 0 && (!d.billing || d.billing.status === "error");
     const canReminder = Boolean(d.billing?.stripeInvoiceUrl) && d.billing?.paymentStatus !== "paid";
     return (
@@ -248,9 +262,13 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
 
   /** Montant HT/TTC d'une ligne (ou estimation si pas encore facturé). */
   function amount(d: DepotListItem) {
-    const weight = d.billing?.weightKg ?? dibWeightKg(d.items);
+    const weight = d.billing?.weightKg ?? billableWeightKg(d.items);
     if (weight <= 0) return null;
-    const htCents = d.billing?.amountCents ?? (priceCentsPerKg !== null ? Math.round(weight * priceCentsPerKg) : null);
+    const htCents = d.billing?.amountCents ?? (
+      priceCentsPerKg !== null && woodPriceCentsPerKg !== null
+        ? estimatedAmountCents(d.items, priceCentsPerKg, woodPriceCentsPerKg)
+        : null
+    );
     if (htCents === null) return null;
     const vat = d.billing?.vatRate ?? 20;
     return { htCents, ttcCents: ttcCents(htCents, vat) };
@@ -267,7 +285,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                 <th className="px-4 py-3 font-semibold">N°</th>
                 <th className="px-4 py-3 font-semibold">Entreprise</th>
                 <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Poids DIB</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Poids facturable</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Montant</th>
                 <th className="px-4 py-3 font-semibold">Statut</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
@@ -275,7 +293,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
             </thead>
             <tbody>
               {depots.map((d) => {
-                const weight = d.billing?.weightKg ?? dibWeightKg(d.items);
+                const weight = d.billing?.weightKg ?? billableWeightKg(d.items);
                 const amt = amount(d);
                 return (
                   <tr
@@ -337,7 +355,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
         {/* ── Mobile : cartes ──────────────────────────────────────────────── */}
         <div className="divide-y divide-[var(--border)] md:hidden">
           {depots.map((d) => {
-            const weight = d.billing?.weightKg ?? dibWeightKg(d.items);
+            const weight = d.billing?.weightKg ?? billableWeightKg(d.items);
             const amt = amount(d);
             return (
               <div
@@ -367,7 +385,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                 </div>
                 <div className="flex items-end justify-between gap-2">
                   <span className="text-xs text-[var(--muted-foreground)]">
-                    {weight > 0 ? `${KG.format(weight)} kg de DIB` : "Pas de DIB pesé"}
+                    {weight > 0 ? `${KG.format(weight)} kg facturables` : "Pas de matière facturable pesée"}
                   </span>
                   {amt ? (
                     <span className="text-right">

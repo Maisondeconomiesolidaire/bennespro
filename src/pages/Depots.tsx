@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { BadgeCheck, BadgeEuro, PackagePlus, Pencil, Recycle } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import { DIB_MATERIAL } from "../lib/materials";
+import { DIB_MATERIAL, WOOD_MATERIAL } from "../lib/materials";
 import { useAppActions } from "../lib/appActions";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { Button } from "../components/ui/Button";
@@ -15,7 +15,7 @@ import { DepotsTable, DepotStats } from "../components/DepotsTable";
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 
 /**
- * Page dépôts / DIB. La page DIB est le même composant avec `dibOnly` : mise en
+ * Page dépôts / facturation. La page dédiée est le même composant avec `dibOnly` : mise en
  * page strictement identique (en-tête, onglets, prix, stats, recherche, table)
  * pour qu'aucun élément ne se décale au changement d'onglet — seul le filtre
  * des lignes et les chiffres changent.
@@ -35,7 +35,9 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
 
   const source = useMemo(() => {
     const list = depots ?? [];
-    return dibOnly ? list.filter((d) => d.items.some((it) => it.material === DIB_MATERIAL)) : list;
+    return dibOnly
+      ? list.filter((d) => d.items.some((it) => it.material === DIB_MATERIAL || it.material === WOOD_MATERIAL))
+      : list;
   }, [depots, dibOnly]);
 
   const filtered = useMemo(() => {
@@ -74,7 +76,7 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">
-          {dibOnly ? "DIB & facturation" : "Dépôts"}
+          {dibOnly ? "Facturation" : "Dépôts"}
         </h1>
         <Button onClick={openNewDepot}>
           <PackagePlus className="h-4 w-4" /> Nouveau dépôt
@@ -84,13 +86,13 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
       <UnderlineTabs
         items={[
           { key: "all", label: "Tous les dépôts" },
-          { key: "dib", label: "DIB & facturation", icon: Recycle },
+          { key: "dib", label: "Facturation", icon: Recycle },
         ]}
         value={dibOnly ? "dib" : "all"}
         onChange={(key) => navigate(key === "dib" ? "/crm/dib" : "/crm")}
       />
 
-      {/* ── Prix du DIB (identique sur les deux onglets) ─────────────────────── */}
+      {/* ── Prix des matières payantes (identique sur les deux onglets) ─────── */}
       <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -107,6 +109,11 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
                   <span className="text-sm font-semibold text-[var(--muted-foreground)]"> HT / kg</span>
                 </p>
               )}
+              {settings !== undefined ? (
+                <p className="text-xs font-medium text-[var(--muted-foreground)]">
+                  Bois : {EUR.format((settings?.woodPriceCentsPerKg ?? 17) / 100)} HT / kg
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -148,7 +155,7 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
         {priceError ? <p className="mt-2 text-sm text-red-600">{priceError}</p> : null}
       </div>
 
-      <DepotStats depots={source} countLabel={dibOnly ? "Dépôts DIB" : "Dépôts au total"} />
+      <DepotStats depots={source} countLabel={dibOnly ? "Dépôts facturables" : "Dépôts au total"} />
 
       <Input
         value={search}
@@ -162,12 +169,12 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Recycle className="h-8 w-8" />}
-          title={search ? "Aucun résultat" : dibOnly ? "Aucun dépôt DIB" : "Aucun dépôt"}
+          title={search ? "Aucun résultat" : dibOnly ? "Aucun dépôt facturable" : "Aucun dépôt"}
           description={
             search
               ? "Aucun dépôt ne correspond à votre recherche."
               : dibOnly
-                ? "Aucun dépôt ne contient de tout-venant / DIB non triés pour l'instant."
+                ? "Aucun dépôt ne contient de DIB ou de bois facturable pour l'instant."
                 : "Enregistrez un premier dépôt pour le voir apparaître ici."
           }
           action={

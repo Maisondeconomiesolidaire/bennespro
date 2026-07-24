@@ -598,7 +598,7 @@ export function AccountDepots() {
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
               >
                 <FileText className="h-4 w-4" />
-                Facture DIB
+                Facture
               </a>
             ) : null}
           </div>
@@ -956,7 +956,7 @@ export function AccountDocumentation() {
         </ul>
         <div className="mt-4 space-y-2 border-t border-zinc-200 pt-4 text-sm leading-relaxed text-zinc-600">
           <p>Chaque entreprise dispose d'une carte d'accès nominative, liée à ses véhicules.</p>
-          <p>Les passages sont enregistrés et facturés en fonction des volumes de DIB déposés.</p>
+          <p>Les passages sont enregistrés et facturés en fonction des poids de DIB et de bois déposés.</p>
         </div>
       </section>
 
