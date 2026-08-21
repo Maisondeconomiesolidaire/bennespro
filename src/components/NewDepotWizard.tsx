@@ -38,6 +38,7 @@ import { SignaturePad } from "./SignaturePad";
 import { CompanyModal } from "./CompanyModal";
 import { QrScannerModal } from "./QrScannerModal";
 import { cn } from "../lib/cn";
+import { useProfileId } from "../lib/profile";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -62,6 +63,7 @@ export function NewDepotWizard({
 }) {
   const companies = useQuery(api.bennespro.listCompanies) ?? [];
   const createDepot = useMutation(api.bennespro.createDepot);
+  const profileId = useProfileId();
   const addVehicle = useMutation(api.bennespro.addVehicle);
   const upload = useUpload();
 
@@ -193,6 +195,9 @@ export function NewDepotWizard({
         attachments,
         comment: comment.trim() || undefined,
         signature: signatureId,
+        // Compte partagé : c'est le profil choisi à l'ouverture qui signe le
+        // dépôt, pas l'adresse email commune à toute l'équipe.
+        profileId,
       });
       setSaved({
         depotNumber,

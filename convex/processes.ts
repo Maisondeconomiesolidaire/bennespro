@@ -13,6 +13,12 @@ export const STEP = {
   factureReglee: "Facture réglée",
   // Livraison
   acompteVerse: "Acompte versé",
+  // Dépôt en recyclerie
+  rdvConfirme: "Rendez-vous confirmé",
+  depotRealise: "Dépôt réalisé",
+  // Boutique : la commande est réglée, reste à savoir si le client l'a retirée.
+  paiementValide: "Paiement validé",
+  retraitEffectue: "Retrait effectué",
 } as const;
 
 /** Process complet à 7 étapes (aérogommage, collecte C2/C3, vélo par défaut). */
@@ -47,7 +53,8 @@ export type RequestType =
   | "collecte"
   | "article"
   | "velo"
-  | "livraison";
+  | "livraison"
+  | "depot";
 
 export type CollecteType = "indefini" | "C1" | "C2" | "C3";
 
@@ -67,9 +74,16 @@ export function resolveProcess(
       // TODO Cycle en Bray : process défini ultérieurement (placeholder = complet).
       return [...FULL];
     case "article":
-      return [STEP.contact, STEP.factureReglee];
+      // Une commande boutique n'a que deux jalons : l'encaissement, puis le
+      // retrait en boutique. Tant que le client n'est pas venu chercher ses
+      // articles, la demande reste ouverte dans le CRM.
+      return [STEP.paiementValide, STEP.retraitEffectue];
     case "livraison":
       return [STEP.acompteVerse, STEP.prestaPlanifiee, STEP.prestaTerminee];
+    case "depot":
+      // Le créneau est choisi par le client : le rendez-vous existe déjà, il
+      // reste à le confirmer puis à constater le dépôt.
+      return [STEP.rdvConfirme, STEP.depotRealise];
     case "collecte":
       switch (collecteType) {
         case "C1":

@@ -23,4 +23,35 @@ crons.hourly(
   internal.reservations.requestRoomFeedbackForPastReservations,
 );
 
+// Prévenance de fin de contrat RH : à J-22, J-15 et J-3 de l'échéance du
+// dernier contrat du salarié, aux responsables de sa structure.
+crons.daily(
+  "prevenance fin de contrat rh",
+  { hourUTC: 5, minuteUTC: 30 },
+  internal.hrContractNotices.sendContractEndNotices,
+);
+
+// Rappel J-1 aux clients qui ont réservé un créneau de dépôt en recyclerie.
+crons.daily(
+  "rappel depot recyclerie",
+  { hourUTC: 7, minuteUTC: 0 },
+  internal.requests.sendDepotReminders,
+);
+
+// Alerte Klyd : article sur Vinted depuis 3 semaines et toujours non gagné.
+crons.daily(
+  "alerte klyd vinted 3 semaines",
+  { hourUTC: 6, minuteUTC: 0 },
+  internal.klyde.sendVintedAlerts,
+);
+
+// Filet de sécurité du catalogue Stripe : chaque écriture sur un article
+// planifie déjà sa synchronisation, mais un statut peut changer par un chemin
+// qui ne la déclenche pas. On repousse ici, chaque nuit, ce qui a dérivé.
+crons.daily(
+  "synchronisation catalogue stripe",
+  { hourUTC: 3, minuteUTC: 20 },
+  internal.stripeCatalog.reconcile,
+);
+
 export default crons;

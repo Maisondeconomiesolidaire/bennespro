@@ -15,6 +15,16 @@ export function titleCaseName(value: string): string {
     );
 }
 
+/** Nom à afficher pour une identité Clerk, homogène dans toutes les apps. */
+export function formatUserName(
+  identity: { name?: string | null; givenName?: string | null; familyName?: string | null; email?: string | null },
+  fallback = "Utilisateur",
+): string {
+  const fullName = [identity.givenName, identity.familyName].filter(Boolean).join(" ").trim();
+  const value = fullName || identity.name?.trim();
+  return value ? titleCaseName(value) : identity.email?.trim() || fallback;
+}
+
 /** Normalise une adresse email pour comparaison/rattachement (trim + minuscules). */
 export function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();
@@ -627,39 +637,17 @@ export async function fetchInternalClerkDirectory(
     if (self && email === self) continue;
     directory.push({
       clerkId,
-      name: [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email,
+      name: formatUserName({
+        givenName: user.first_name,
+        familyName: user.last_name,
+        name: user.username,
+        email,
+      }),
       imageUrl: typeof user.image_url === "string" ? user.image_url : null,
     });
   }
 
   return directory.sort((a, b) => a.name.localeCompare(b.name, "fr"));
-}
-
-/**
- * Fin effective d'une réservation de véhicule, pour tout calcul de
- * disponibilité.
- *
- * C'est le retour de l'utilisateur qui libère le véhicule, pas la date de fin
- * prévue : rendu en avance, il redevient réservable immédiatement ; pas encore
- * rendu, il reste occupé au-delà du créneau initial. Sans cette règle, un
- * véhicule non rendu réapparaissait comme libre à la fin du créneau et pouvait
- * être réservé — ou affecté à une tournée recyclerie — alors qu'il n'était pas
- * revenu au dépôt.
- *
- * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
- * les mêmes véhicules physiques.
- */
-export function vehicleReservationBusyEnd(
-  reservation: { start: number; end: number; feedbackSubmittedAt?: number },
-  now: number,
-) {
-  if (typeof reservation.feedbackSubmittedAt === "number") {
-    return Math.max(reservation.start, reservation.feedbackSubmittedAt);
-  }
-  // Réservations antérieures à la règle : on s'en tient à la fin prévue (cf.
-  // MANDATORY_RETURN_SINCE), sinon 11 véhicules seraient immobilisés d'un coup.
-  if (reservation.end < MANDATORY_RETURN_SINCE) return reservation.end;
-  return Math.max(reservation.end, now);
 }
 
 /**
@@ -672,3 +660,56 @@ export function vehicleReservationBusyEnd(
  * ne vaut donc que pour les emprunts qui se terminent après sa mise en service.
  */
 export const MANDATORY_RETURN_SINCE = Date.parse("2026-07-20T00:00:00.000Z");
+
+/**
+ * Fin effective d'une réservation de véhicule, pour tout calcul de
+ * disponibilité. Trois cas, dans cet ordre :
+ *
+ * 1. **Retour enregistré** → le véhicule est physiquement revenu : il est libre
+ *    à partir de l'heure du retour. Le retour peut être saisi après coup, donc
+ *    on ne rallonge jamais au-delà de la fin prévue (fin à 11 h, formulaire
+ *    envoyé à 14 h ⇒ libre depuis 11 h).
+ * 2. **Créneau terminé sans retour** → la personne a toujours le véhicule :
+ *    l'occupation devient **ouverte** (`Infinity`) et le véhicule n'est
+ *    réservable par personne, à aucune date, tant que le retour n'est pas
+ *    enregistré (par l'emprunteur ou manuellement par un gestionnaire).
+ * 3. **Créneau en cours ou à venir** → la fin prévue fait foi ; on peut
+ *    réserver après, comme n'importe quelle réservation planifiée.
+ *
+ * Le cas 2 ne vaut que pour les emprunts soumis au retour obligatoire
+ * (cf. `MANDATORY_RETURN_SINCE`) : sans ce garde-fou, de vieilles réservations
+ * d'avant la règle immobiliseraient définitivement la flotte.
+ *
+ * ⚠️ Peut renvoyer `Infinity` : réservé aux comparaisons de chevauchement,
+ * jamais à stocker ni à renvoyer tel quel à un frontend.
+ *
+ * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
+ * les mêmes véhicules physiques.
+ */
+export function vehicleReservationBusyEnd(
+  reservation: { start: number; end: number; feedbackSubmittedAt?: number },
+  now: number,
+) {
+  if (typeof reservation.feedbackSubmittedAt === "number") {
+    return Math.min(
+      reservation.end,
+      Math.max(reservation.start, reservation.feedbackSubmittedAt),
+    );
+  }
+  if (reservation.end <= now && reservation.end >= MANDATORY_RETURN_SINCE) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return reservation.end;
+}
+
+/** Réservation terminée dont le retour manque encore : véhicule non rendu. */
+export function isVehicleReturnOverdue(
+  reservation: { end: number; feedbackSubmittedAt?: number },
+  now: number,
+) {
+  return (
+    reservation.feedbackSubmittedAt === undefined &&
+    reservation.end <= now &&
+    reservation.end >= MANDATORY_RETURN_SINCE
+  );
+}

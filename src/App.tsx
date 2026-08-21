@@ -7,6 +7,7 @@ import { Entreprises } from "./pages/Entreprises";
 import { Messages } from "./pages/Messages";
 import { Dib } from "./pages/Dib";
 import { Compte } from "./pages/Compte";
+import { Profils } from "./pages/Profils";
 import { PublicLayout } from "./components/public/PublicLayout";
 import { RequirePublicAccount } from "./components/public/RequirePublicAccount";
 import { Landing } from "./pages/public/Landing";
@@ -80,6 +81,7 @@ export default function App() {
               </RequirePermission>
             }
           />
+          <Route path="profils" element={<Profils />} />
           <Route path="compte" element={<Compte />} />
         </Route>
 

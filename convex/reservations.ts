@@ -8,16 +8,18 @@ import {
   clerkIdForEmail,
   emailForClerkId,
   fetchInternalClerkDirectory,
+  formatUserName,
   hasCrmPermission,
   isReservationParticipant,
+  isVehicleReturnOverdue,
   photoForClerkId,
-  MANDATORY_RETURN_SINCE,
   requireCrmPermission,
   requireUser,
   vehicleReservationBusyEnd,
 } from "./lib";
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
+import { awardEngagementPoints } from "./points";
 
 /** Photo de profil de l'identité Clerk courante, si présente. */
 function pictureUrl(identity: unknown): string | undefined {
@@ -58,11 +60,39 @@ function overlaps(startA: number, endA: number, startB: number, endB: number) {
   return startA < endB && endA > startB;
 }
 
+/**
+ * Réservation approuvée qui occupe le véhicule sur `[start, end[`, ou
+ * `undefined`. L'occupation est calculée par `vehicleReservationBusyEnd` :
+ * retour anticipé = libéré plus tôt, retour manquant = occupé sans limite.
+ */
+function conflictingVehicleReservation(
+  reservations: Doc<"vehicleReservations">[],
+  start: number,
+  end: number,
+  now: number,
+  excludeId?: Id<"vehicleReservations">,
+) {
+  return reservations
+    .filter((reservation) => reservation._id !== excludeId)
+    .sort((a, b) => a.start - b.start)
+    .find((reservation) =>
+      overlaps(reservation.start, vehicleReservationBusyEnd(reservation, now), start, end),
+    );
+}
+
+/** Message d'erreur d'un conflit : « déjà réservé » ou « pas encore rendu ». */
+function vehicleConflictMessage(reservation: Doc<"vehicleReservations">, now: number) {
+  return isVehicleReturnOverdue(reservation, now)
+    ? `Ce véhicule n'a pas encore été rendu par ${reservation.userName} : le retour doit être enregistré avant toute nouvelle réservation.`
+    : "Ce véhicule est déjà réservé sur ce créneau.";
+}
+
 async function ensureVehicleAvailable(
   ctx: QueryCtx | MutationCtx,
   vehicleId: Id<"vehicles">,
   start: number,
   end: number,
+  excludeId?: Id<"vehicleReservations">,
 ) {
   const dayMs = 86_400_000;
   for (
@@ -75,10 +105,10 @@ async function ensureVehicleAvailable(
     const reason = await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true });
     if (reason) throw new Error(reason);
   }
+  const now = Date.now();
   const approved = await approvedReservationsForVehicle(ctx, vehicleId);
-  if (approved.some((reservation) => overlaps(reservation.start, reservation.end, start, end))) {
-    throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
-  }
+  const conflict = conflictingVehicleReservation(approved, start, end, now, excludeId);
+  if (conflict) throw new Error(vehicleConflictMessage(conflict, now));
 }
 
 function displayName(identity: {
@@ -87,11 +117,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 function normalizeVehicleKind(kind: string) {
@@ -119,6 +145,10 @@ async function approvedReservationsForVehicle(
     .query("vehicleReservations")
     .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
     .collect();
+  // Les réservations rendues sont conservées ici : c'est
+  // `vehicleReservationBusyEnd` qui les ramène à leur occupation réelle
+  // (libérées à l'heure du retour). Une seule règle d'occupation, un seul
+  // endroit où la lire.
   return reservations.filter((reservation) => reservation.status === "approved");
 }
 
@@ -148,10 +178,7 @@ async function overdueVehicleReturnsFor(ctx: QueryCtx | MutationCtx, clerkId: st
   const now = Date.now();
   return [...byId.values()].filter(
     (reservation) =>
-      reservation.status === "approved" &&
-      !reservation.feedbackSubmittedAt &&
-      reservation.end < now &&
-      reservation.end >= MANDATORY_RETURN_SINCE,
+      reservation.status === "approved" && isVehicleReturnOverdue(reservation, now),
   );
 }
 
@@ -389,6 +416,11 @@ export const bookRoom = mutation({
       status: "confirmed",
       createdAt: Date.now(),
     });
+    await awardEngagementPoints(ctx, {
+      clerkId: target.clerkId ?? identity.subject,
+      displayName: target.name,
+      eventKey: `room-reservation:${reservationId}`,
+    });
     await createMesoutilsNotification(ctx, {
       recipientClerkId: target.clerkId ?? identity.subject,
       kind: "room_reservation_confirmed",
@@ -489,15 +521,7 @@ async function isVehicleFree(
     if (await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true })) return false;
   }
   const approved = await approvedReservationsForVehicle(ctx, vehicleId);
-  const now = Date.now();
-  if (
-    approved.some((reservation) =>
-      overlaps(reservation.start, vehicleReservationBusyEnd(reservation, now), start, end),
-    )
-  ) {
-    return false;
-  }
-  return true;
+  return conflictingVehicleReservation(approved, start, end, Date.now()) === undefined;
 }
 
 export const availableRooms = query({
@@ -574,16 +598,7 @@ export const listVehiclesForSlot = query({
       withPhotos.map(async (vehicle) => {
         const approved = await approvedReservationsForVehicle(ctx, vehicle._id);
         const nowMs = Date.now();
-        const conflict = approved
-          .filter((reservation) =>
-            overlaps(
-              reservation.start,
-              vehicleReservationBusyEnd(reservation, nowMs),
-              args.start,
-              args.end,
-            ),
-          )
-          .sort((a, b) => a.start - b.start)[0];
+        const conflict = conflictingVehicleReservation(approved, args.start, args.end, nowMs);
         let unavailableReason: string | null = null;
         if (!conflict && !(await isVehicleFree(ctx, vehicle._id, args.start, args.end))) {
           unavailableReason = "Indisponible sur ce créneau";
@@ -591,7 +606,12 @@ export const listVehiclesForSlot = query({
         return {
           ...vehicle,
           occupiedBy: conflict
-            ? { userName: conflict.userName, start: conflict.start, end: conflict.end }
+            ? {
+                userName: conflict.userName,
+                start: conflict.start,
+                end: conflict.end,
+                returnRequired: isVehicleReturnOverdue(conflict, nowMs),
+              }
             : null,
           unavailableReason,
         };
@@ -784,8 +804,20 @@ export const submitVehicleFeedback = mutation({
     fuelRestored: v.optional(v.boolean()),
     vehicleEmpty: v.boolean(),
     vehicleClean: v.boolean(),
+    /** L'utilisateur déclare-t-il un incident ? Détermine `issues`. */
+    incident: v.optional(v.boolean()),
     issues: v.optional(v.string()),
     notes: v.optional(v.string()),
+    /** Photos / vidéos déjà envoyées via `files.generateUploadUrl`. */
+    media: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          contentType: v.optional(v.string()),
+          name: v.optional(v.string()),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
@@ -825,8 +857,84 @@ export const submitVehicleFeedback = mutation({
         reservation.usageType === "personal" ? Boolean(args.fuelRestored) : undefined,
       feedbackVehicleEmpty: args.vehicleEmpty,
       feedbackVehicleClean: args.vehicleClean,
-      feedbackIssues: args.issues?.trim() || undefined,
+      // Sans incident déclaré, aucun texte d'incident n'est conservé : le retour
+      // ne doit pas remonter dans les remarques.
+      feedbackIncident: Boolean(args.incident),
+      feedbackIssues: args.incident ? args.issues?.trim() || undefined : undefined,
       feedbackNotes: args.notes?.trim() || undefined,
+      // Au plus 6 pièces jointes : de quoi illustrer un problème sans
+      // transformer le retour en album photo.
+      feedbackMedia: args.media?.length ? args.media.slice(0, 6) : undefined,
+    });
+    await awardEngagementPoints(ctx, {
+      clerkId: identity.subject,
+      displayName: displayName(identity),
+      eventKey: `vehicle-return:${args.reservationId}`,
+    });
+    // Chaque nouveau retour relance une synthèse qui tient compte de tout
+    // l'historique du véhicule et de ses éventuels problèmes récurrents.
+    await ctx.scheduler.runAfter(0, internal.vehicleRemarkAnalysis.analyze, {
+      vehicleId: reservation.vehicleId,
+    });
+  },
+});
+
+/**
+ * Libère manuellement un véhicule lorsqu'un utilisateur ne peut pas faire son
+ * retour. Réservé aux gestionnaires : l'opération est tracée sur la réservation.
+ */
+export const markVehicleReturned = mutation({
+  args: { reservationId: v.id("vehicleReservations") },
+  handler: async (ctx, { reservationId }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "manage");
+    const identity = await requireUser(ctx);
+    const reservation = await ctx.db.get(reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    if (reservation.status !== "approved") {
+      throw new Error("Seule une réservation approuvée peut être clôturée.");
+    }
+    if (reservation.feedbackSubmittedAt) return;
+    const now = Date.now();
+    await ctx.db.patch(reservationId, {
+      feedbackSubmittedAt: now,
+      feedbackManualReturnAt: now,
+      feedbackManualReturnBy: displayName(identity),
+      feedbackNotes: [reservation.feedbackNotes, "Retour confirmé manuellement par l'équipe."].filter(Boolean).join("\n"),
+    });
+  },
+});
+
+/** Relance le demandeur d'une réservation terminée dont le retour manque encore. */
+export const remindVehicleReturn = mutation({
+  args: { reservationId: v.id("vehicleReservations") },
+  handler: async (ctx, { reservationId }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "manage");
+    const reservation = await ctx.db.get(reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    if (reservation.status !== "approved" || reservation.end >= Date.now()) {
+      throw new Error("Seule une réservation approuvée et terminée peut être relancée.");
+    }
+    if (reservation.feedbackSubmittedAt) {
+      throw new Error("Le retour de cette réservation a déjà été effectué.");
+    }
+
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const email = await emailForClerkId(ctx, recipientClerkId);
+    if (!email) throw new Error("Adresse e-mail introuvable pour cet utilisateur.");
+
+    const vehicle = await ctx.db.get(reservation.vehicleId);
+    const now = Date.now();
+    await ctx.db.patch(reservationId, { feedbackReminderSentAt: now });
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendVehicleFeedbackRequestEmail, {
+      email,
+      name: reservation.userName,
+      vehicleName: vehicle?.name ?? "Véhicule",
+      vehicleImageUrl:
+        (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+        undefined,
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
     });
   },
 });
@@ -875,6 +983,8 @@ export const submitRoomFeedback = mutation({
     reservationId: v.id("roomReservations"),
     clean: v.boolean(),
     tidy: v.boolean(),
+    /** L'utilisateur déclare-t-il un incident ? Détermine `issues`. */
+    incident: v.optional(v.boolean()),
     issues: v.optional(v.string()),
     notes: v.optional(v.string()),
   },
@@ -893,7 +1003,8 @@ export const submitRoomFeedback = mutation({
       feedbackSubmittedAt: Date.now(),
       feedbackClean: args.clean,
       feedbackTidy: args.tidy,
-      feedbackIssues: args.issues?.trim() || undefined,
+      feedbackIncident: Boolean(args.incident),
+      feedbackIssues: args.incident ? args.issues?.trim() || undefined : undefined,
       feedbackNotes: args.notes?.trim() || undefined,
     });
   },
@@ -949,7 +1060,12 @@ export const listVehicleRemarks = query({
           .order("desc")
           .collect()
       : await ctx.db.query("vehicleReservations").order("desc").take(300);
-    const reservations = raw.filter((r) => r.feedbackSubmittedAt);
+    // Un retour « tout est ok » n'est pas une remarque : seuls les retours ayant
+    // déclaré un incident remontent ici. Les retours antérieurs au drapeau
+    // `feedbackIncident` sont jugés sur la présence d'un texte d'incident.
+    const reservations = raw.filter(
+      (r) => r.feedbackSubmittedAt && (r.feedbackIncident ?? Boolean(r.feedbackIssues?.trim())),
+    );
     const [vehicles, mileageSource] = await Promise.all([
       ctx.db.query("vehicles").collect(),
       vehicleId ? Promise.resolve(raw) : ctx.db.query("vehicleReservations").collect(),
@@ -995,6 +1111,7 @@ export const listVehicleRemarks = query({
           const vehicle = byId.get(String(r.vehicleId)) ?? null;
           return {
             _id: r._id,
+            vehicleId: r.vehicleId,
             assetName: vehicle?.name ?? "Véhicule",
             photoUrl:
               (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? null,
@@ -1011,6 +1128,14 @@ export const listVehicleRemarks = query({
             vehicleClean: r.feedbackVehicleClean,
             issues: r.feedbackIssues,
             notes: r.feedbackNotes,
+            media: (
+              await Promise.all(
+                (r.feedbackMedia ?? []).map(async (item) => {
+                  const url = await ctx.storage.getUrl(item.storageId);
+                  return url ? { url, contentType: item.contentType, name: item.name } : null;
+                }),
+              )
+            ).flatMap((item) => (item ? [item] : [])),
           };
         }),
     );
@@ -1023,7 +1148,7 @@ export const listRoomRemarks = query({
     await requireCrmPermission(ctx, "mesoutils:salles", "read");
     const reservations = (
       await ctx.db.query("roomReservations").order("desc").take(300)
-    ).filter((r) => r.feedbackSubmittedAt);
+    ).filter((r) => r.feedbackSubmittedAt && (r.feedbackIncident ?? Boolean(r.feedbackIssues?.trim())));
     const rooms = await ctx.db.query("rooms").collect();
     const byId = new Map(rooms.map((room) => [String(room._id), room]));
 
@@ -1160,14 +1285,6 @@ export const requestVehicle = mutation({
 
     await ensureVehicleAvailable(ctx, args.vehicleId, args.start, args.end);
 
-    const approvedReservations = await approvedReservationsForVehicle(ctx, args.vehicleId);
-    const conflict = approvedReservations.find((reservation) =>
-      overlaps(reservation.start, reservation.end, args.start, args.end),
-    );
-    if (conflict) {
-      throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
-    }
-
     const target = await resolveReservationTarget(ctx, identity, args.forClerkId, args.forName);
     const willTransport = args.willTransport ?? false;
     const transportDetails = willTransport
@@ -1188,6 +1305,11 @@ export const requestVehicle = mutation({
       end: args.end,
       status: "pending",
       createdAt: Date.now(),
+    });
+    await awardEngagementPoints(ctx, {
+      clerkId: target.clerkId ?? identity.subject,
+      displayName: target.name,
+      eventKey: `vehicle-reservation:${reservationId}`,
     });
 
     // Les responsables sont notifiés de chaque demande de réservation véhicule :
@@ -1288,14 +1410,15 @@ async function applyVehicleReservationDecision(
   }
 
   if (args.decision === "approved") {
-    await ensureVehicleAvailable(ctx, reservation.vehicleId, reservation.start, reservation.end);
-    const approvedReservations = await approvedReservationsForVehicle(ctx, reservation.vehicleId);
-    const conflict = approvedReservations.find(
-      (item) =>
-        item._id !== reservation._id &&
-        overlaps(item.start, item.end, reservation.start, reservation.end),
+    // La réservation elle-même est exclue du contrôle : une demande déjà
+    // approuvée puis re-décidée ne doit pas entrer en conflit avec elle-même.
+    await ensureVehicleAvailable(
+      ctx,
+      reservation.vehicleId,
+      reservation.start,
+      reservation.end,
+      reservation._id,
     );
-    if (conflict) throw new Error("Le véhicule est déjà réservé sur ce créneau.");
   }
 
   await ctx.db.patch(args.reservationId, {

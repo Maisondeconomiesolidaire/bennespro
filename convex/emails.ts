@@ -38,6 +38,7 @@ const TYPE_LABELS: Record<string, string> = {
   article: "Boutique",
   velo: "Recyclerie",
   livraison: "Livraison",
+  depot: "Dépôt en recyclerie",
 };
 
 function typeLabel(type: string) {
@@ -155,6 +156,90 @@ function noReplyNotice() {
   </table>`;
 }
 
+/** Horaires de la recyclerie, du lundi au dimanche. */
+const SHOP_HOURS: Array<[string, string | null]> = [
+  ["Lundi", null],
+  ["Mardi", "14h00 – 17h00"],
+  ["Mercredi", "14h00 – 17h00"],
+  ["Jeudi", "14h00 – 17h00"],
+  ["Vendredi", "14h00 – 17h00"],
+  ["Samedi", "14h00 – 17h00"],
+  ["Dimanche", null],
+];
+
+const SHOP_ADDRESS = "4 Rue de la Prairie, 60650 Lachapelle-aux-Pots";
+const SHOP_PHONE = "03 75 15 04 78";
+
+/**
+ * Rappel « click & collect » : l'achat en ligne se retire sur place, donc le
+ * client a besoin de l'adresse et des horaires dans l'email de confirmation.
+ */
+function clickAndCollectNotice() {
+  const rows = SHOP_HOURS.map(([day, hours]) => {
+    const closed = hours === null;
+    return `<tr>
+      <td style="padding:5px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:${closed ? "#a1a1aa" : "#3f3f46"};">${day}</td>
+      <td align="right" style="padding:5px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:${closed ? "400" : "700"};line-height:1.5;color:${closed ? "#a1a1aa" : "#18181b"};">${closed ? "Fermé" : hours}</td>
+    </tr>`;
+  }).join("");
+
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:26px 0 0;border:1px solid #e4e4e7;border-radius:16px;background:#fafafa;">
+    <tr>
+      <td class="px" style="padding:22px 24px;">
+        <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;line-height:1.35;color:#18181b;">
+          🛍️ Retrait en click &amp; collect
+        </p>
+        <p style="margin:0 0 16px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          Votre commande est payée : il ne reste plus qu'à venir la chercher à la
+          recyclerie. Il n'y a pas de livraison, et rien à régler sur place.
+        </p>
+        <p style="margin:0 0 16px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          <strong>La Recyclerie du Pays de Bray</strong><br/>
+          ${esc(SHOP_ADDRESS)}<br/>
+          ${esc(SHOP_PHONE)}
+        </p>
+        <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#71717a;">
+          Horaires d'ouverture
+        </p>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+          ${rows}
+        </table>
+      </td>
+    </tr>
+  </table>`;
+}
+
+/** Délai laissé au client pour venir chercher un article payé en ligne. */
+export const PICKUP_DEADLINE_DAYS = 5;
+
+/**
+ * Rappel du délai de retrait, affiché uniquement sur les commandes payées en
+ * ligne : passé ce délai l'article est remboursé et remis en vente.
+ */
+function pickupDeadlineNotice(deadline?: number) {
+  const dateLine = deadline
+    ? `<p style="margin:0 0 12px;font-family:Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:1.6;color:#3f3f46;">
+        À retirer avant le ${formatDay(deadline)}.
+      </p>`
+    : "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:26px 0 0;border:2px solid #f59e0b;border-radius:16px;background:#fffbeb;">
+    <tr>
+      <td class="px" style="padding:22px 24px;">
+        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;line-height:1.35;color:#b45309;">
+          ⏳ Vous avez ${PICKUP_DEADLINE_DAYS} jours pour retirer votre article
+        </p>
+        ${dateLine}
+        <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          Passé ce délai, votre commande sera <strong>remboursée</strong> et
+          l'article <strong>remis en vente</strong> en boutique et en ligne.
+          Si vous ne pouvez pas venir à temps, prévenez-nous depuis votre espace
+          client : nous trouverons une solution.
+        </p>
+      </td>
+    </tr>
+  </table>`;
+}
+
 /** Gabarit complet : préheader, en-tête (logo), contenu, pied de page. */
 function shell(opts: {
   preheader: string;
@@ -224,17 +309,29 @@ function shell(opts: {
 /** Pièce jointe Resend : contenu en base64. */
 export type EmailAttachment = { filename: string; content: string };
 
+/** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+type ResendSendOptions = { bcc?: string[] };
+
 export async function resendSend(
   to: string | string[],
   subject: string,
   html: string,
   from: string = FROM,
   attachments?: EmailAttachment[],
+  options?: ResendSendOptions,
 ) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("RESEND_API_KEY non configurée — email ignoré.");
-    return;
+    return false;
   }
   // Un SEUL appel Resend, même pour plusieurs destinataires (évite de dépasser
   // la limite de 2 requêtes/seconde de Resend qui faisait silencieusement
@@ -242,7 +339,10 @@ export async function resendSend(
   const recipients = (Array.isArray(to) ? to : [to])
     .map((email) => email.trim())
     .filter(Boolean);
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return false;
+  const bcc = (options?.bcc ?? [])
+    .map((email) => email.trim())
+    .filter(Boolean);
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -255,6 +355,7 @@ export async function resendSend(
       to: recipients,
       subject,
       html,
+      ...(bcc.length > 0 ? { bcc } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
     }),
   });
@@ -264,7 +365,10 @@ export async function resendSend(
       `Resend (${response.status}) :`,
       (await response.text()).slice(0, 300),
     );
+    return false;
   }
+
+  return true;
 }
 
 const articleArg = v.optional(
@@ -317,22 +421,43 @@ export const sendRequestConfirmation = internalAction({
     type: v.string(),
     requestId: v.string(),
     article: articleArg,
+    /** Commande réglée en ligne : le message parle d'achat, pas de demande. */
+    paid: v.optional(v.boolean()),
+    /** Date limite de retrait (ms), pour les commandes payées. */
+    pickupDeadline: v.optional(v.number()),
   },
-  handler: async (_ctx, { email, name, reference, type, requestId, article }) => {
+  handler: async (
+    _ctx,
+    { email, name, reference, type, requestId, article, paid, pickupDeadline },
+  ) => {
     const label = typeLabel(type);
     const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
     const html = shell({
-      preheader: `Votre demande ${label} #${reference} est bien enregistrée.`,
-      heading: "Votre demande est bien enregistrée 🎉",
-      intro: `Bonjour ${esc(name)},<br/><br/>Nous avons bien reçu votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>). Notre équipe la traite et revient vers vous très prochainement.`,
+      preheader: paid
+        ? `Commande #${reference} confirmée — à retirer en click & collect sous ${PICKUP_DEADLINE_DAYS} jours.`
+        : `Votre demande ${label} #${reference} est bien enregistrée.`,
+      heading: paid
+        ? "Votre commande est confirmée 🎉"
+        : "Votre demande est bien enregistrée 🎉",
+      intro: paid
+        ? `Bonjour ${esc(name)},<br/><br/>Votre paiement est bien reçu et votre commande <strong>#${esc(reference)}</strong> est confirmée. C'est une commande en <strong>click &amp; collect</strong> : votre article vous attend à la recyclerie, aux horaires d'ouverture indiqués plus bas.`
+        : `Bonjour ${esc(name)},<br/><br/>Nous avons bien reçu votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>). Notre équipe la traite et revient vers vous très prochainement.`,
       contentHtml: `
         ${buildArticleCard(article)}
-        <div style="margin:0 0 22px;">${button(orderUrl, "Suivre ma demande")}</div>
-        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
+        <div style="margin:0 0 22px;">${button(orderUrl, paid ? "Voir ma commande" : "Suivre ma demande")}</div>
+        ${paid ? clickAndCollectNotice() : ""}
+        ${paid ? pickupDeadlineNotice(pickupDeadline) : ""}
+        <p style="margin:22px 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
         ${quickLinks()}
       `,
     });
-    await resendSend(email, `Demande bien reçue · ${label} #${reference}`, html);
+    await resendSend(
+      email,
+      paid
+        ? `Commande confirmée · #${reference} · à retirer sous ${PICKUP_DEADLINE_DAYS} jours`
+        : `Demande bien reçue · ${label} #${reference}`,
+      html,
+    );
   },
 });
 
@@ -347,6 +472,39 @@ const AEROGOMMAGE_STAFF_EMAILS = [
   ...NEW_REQUEST_STAFF_EMAILS,
   "e.carette@eco-solidaire.fr",
 ];
+
+/** Lien de paiement envoyé au client depuis le CRM. */
+export const sendPaymentLink = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    amount: v.number(),
+    url: v.string(),
+    articleTitles: v.array(v.string()),
+  },
+  handler: async (_ctx, { email, name, amount, url, articleTitles }) => {
+    const list = articleTitles.length
+      ? `<ul style="margin:0 0 22px;padding-left:20px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.7;color:#3f3f46;">
+          ${articleTitles.map((title) => `<li>${esc(title)}</li>`).join("")}
+        </ul>`
+      : "";
+    const html = shell({
+      preheader: `Réglez votre commande en ligne : ${euro(amount)}.`,
+      heading: "Votre lien de paiement",
+      intro: `Bonjour ${esc(name || "")},<br/><br/>Voici le lien pour régler votre commande en ligne, d'un montant de <strong>${euro(amount)}</strong>. Le paiement est sécurisé et ne prend qu'une minute.`,
+      contentHtml: `
+        ${list}
+        <div style="margin:0 0 22px;">${button(url, `Payer ${euro(amount)}`)}</div>
+        <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">
+          Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br/>
+          <span style="word-break:break-all;color:${BRAND};">${esc(url)}</span>
+        </p>
+        ${pickupDeadlineNotice()}
+      `,
+    });
+    await resendSend(email, `Votre lien de paiement · ${euro(amount)}`, html);
+  },
+});
 
 export const sendNewRequestToStaff = internalAction({
   args: {
@@ -493,6 +651,65 @@ export const sendScheduled = internalAction({
       `,
     });
     await resendSend(email, `Intervention programmée · ${label} #${reference}`, html);
+  },
+});
+
+// ─── Dépôt en recyclerie ─────────────────────────────────────────────────────
+
+/**
+ * Rappel envoyé la veille d'un dépôt : mémo de préparation et lien d'annulation
+ * pour libérer le créneau si le client a un empêchement.
+ */
+export const sendDepotReminder = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    requestId: v.string(),
+    siteLabel: v.string(),
+    slotStart: v.number(),
+  },
+  handler: async (_ctx, { email, name, requestId, siteLabel, slotStart }) => {
+    const day = formatDay(slotStart);
+    const hour = new Intl.DateTimeFormat("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Paris",
+    }).format(new Date(slotStart));
+    const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
+    const memo = [
+      "Vérifiez que vos objets sont propres, complets et réutilisables.",
+      'Pensez à prendre des "gros bras" avec vous si vous avez des meubles lourds à décharger.',
+      "Merci d'arriver à l'heure pour garantir la fluidité de notre accueil.",
+    ]
+      .map(
+        (line) =>
+          `<tr><td style="padding:4px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">• ${esc(line)}</td></tr>`,
+      )
+      .join("");
+
+    const html = shell({
+      preheader: `Rappel : votre dépôt est prévu demain à ${hour}.`,
+      heading: "Petit rappel : c'est demain !",
+      intro: `Bonjour ${esc(name)},<br/><br/>Petit rappel ! Nous vous attendons demain pour votre dépôt d'objets.`,
+      contentHtml: `
+        <div style="margin:0 0 22px;padding:16px 18px;background:linear-gradient(135deg,#fff7ef,#ffe9d6);border:1px solid #ffe0c4;border-radius:14px;text-align:center;">
+          <p style="margin:0 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Votre créneau</p>
+          <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;color:${BRAND};text-transform:capitalize;">${esc(day)} à ${esc(hour)}</p>
+          <p style="margin:6px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${esc(siteLabel)}</p>
+        </div>
+        <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#18181b;">Un rapide mémo avant votre venue :</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;">${memo}</table>
+        <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">
+          Un empêchement ? Merci d'annuler votre créneau, pour libérer la place.
+        </p>
+        <div style="margin:0 0 22px;">${button(orderUrl, "Annuler mon créneau", false)}</div>
+        <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">
+          À demain, et merci pour votre engagement en faveur du réemploi !<br/>
+          L'équipe de la Recyclerie.
+        </p>
+      `,
+    });
+    await resendSend(email, `Rappel · votre dépôt demain à ${hour}`, html);
   },
 });
 

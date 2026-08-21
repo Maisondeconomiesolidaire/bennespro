@@ -16,13 +16,25 @@ import {
   requireUser,
   titleCaseName,
 } from "./lib";
+import { bytesToBase64, type EmailAttachment } from "./emails";
 import type { Doc, Id } from "./_generated/dataModel";
 
 const RH_PAGE_KEY = "mesoutils:rh";
 const CONTRACT_WEBHOOK_URL =
   "https://hook.eu2.make.com/huqlb8dif2n27j5bpnp5tycwniqrt1ow";
 
-const genderValidator = v.union(v.literal("homme"), v.literal("femme"));
+/** Structures dont les contrats générés sont notifiés par email à la direction. */
+const CONTRACT_NOTICE_STRUCTURES = new Set(["MES", "LSDB"]);
+
+/** Plafond de la pièce jointe (Resend refuse au-delà de ~40 Mo encodés). */
+const MAX_CONTRACT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+const DOCUMENT_LABELS: Record<string, string> = {
+  contrat_initial: "Contrat initial",
+  avenant_prolong: "Avenant de prolongation",
+};
+
+const genderValidator = v.union(v.literal("Monsieur"), v.literal("Madame"));
 const structureValidator = v.union(
   v.literal("Pays de Bray Services 60"),
   v.literal("Pays de Bray Services 76"),
@@ -35,6 +47,7 @@ const structureValidator = v.union(
 
 const contractPayloadArgs = {
   employeeId: v.id("hrEmployees"),
+  numero_contrat: v.string(),
   type_contrat: v.union(
     v.literal("CDDI"),
     v.literal("CDI-Inclusion"),
@@ -69,7 +82,7 @@ function normalizeAddress(value: string) {
 function normalizeEmployeeInput(args: {
   firstName: string;
   lastName: string;
-  gender: "homme" | "femme";
+  gender: "Monsieur" | "Madame";
   address: string;
   structure:
     | "Pays de Bray Services 60"
@@ -178,6 +191,7 @@ function contractPayloadFromEmployee(
   employee: Doc<"hrEmployees">,
   args: {
     employeeId: Id<"hrEmployees">;
+    numero_contrat: string;
     type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDI";
     type_document: "contrat_initial" | "avenant_prolong";
     date_fin_contrat: string;
@@ -196,9 +210,12 @@ function contractPayloadFromEmployee(
   return {
     genre_salarie: employee.gender,
     nom_prenom_salarie: employee.fullName,
+    Nom_contrat: `${employee.lastName.replace(/\s+/g, "")}-${employee.firstName.replace(/\s+/g, "")}`,
+    nom_contrat: `${employee.lastName.replace(/\s+/g, "")}-${employee.firstName.replace(/\s+/g, "")}-${args.type_document}-${todayInParis()}`,
     adresse_salarie: employee.address,
     num_sec_sociale: employee.socialSecurityNumber,
     structure: structureForWebhook(employee.structure),
+    numero_contrat: args.numero_contrat.trim(),
     type_contrat: args.type_contrat,
     type_document: args.type_document,
     date_fin_contrat: args.date_fin_contrat.trim(),
@@ -220,6 +237,110 @@ function contractPayloadFromEmployee(
     PREMIER_CONTRAT:
       args.PREMIER_CONTRAT.trim() || employee.firstContractDate?.trim() || "",
   };
+}
+
+function todayInParis() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function sharePointUrlFromWebhookResponse(responseText: string) {
+  const text = responseText.trim();
+  const candidates = [text];
+  try {
+    const body = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["url", "webUrl", "web_url", "link"]) {
+      if (typeof body[key] === "string") candidates.push(body[key]);
+    }
+  } catch {
+    // Le module Webhook response de Make renvoie généralement l'URL en texte brut.
+  }
+
+  return candidates.find((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }) ?? null;
+}
+
+/**
+ * URL de téléchargement direct depuis le lien SharePoint renvoyé par Make.
+ *
+ * Make renvoie un lien de visualisation (`_layouts/15/Doc.aspx?sourcedoc=…`) :
+ * `download.aspx` sur le même `sourcedoc` renvoie le fichier brut.
+ */
+function sharePointDownloadUrl(webUrl: string) {
+  try {
+    const url = new URL(webUrl);
+    const sourcedoc = url.searchParams.get("sourcedoc");
+    if (!sourcedoc) return null;
+    const download = new URL(url.origin + url.pathname.replace(/Doc\.aspx$/i, "download.aspx"));
+    download.searchParams.set("sourcedoc", sourcedoc);
+    return download.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Nom de fichier porté par le lien SharePoint, sinon un nom construit. */
+function contractFileName(webUrl: string, fallback: string) {
+  try {
+    const fromUrl = new URL(webUrl).searchParams.get("file")?.trim();
+    if (fromUrl) return fromUrl;
+  } catch {
+    // Lien inattendu : on retombe sur le nom construit.
+  }
+  return `${fallback}.docx`;
+}
+
+/**
+ * Télécharge le contrat pour le joindre à l'email.
+ *
+ * Renvoie `null` (sans lever) si le document n'est pas accessible sans session
+ * SharePoint : l'email doit partir malgré tout, et surtout la génération du
+ * contrat ne doit pas échouer pour un problème de notification.
+ */
+async function fetchContractAttachment(
+  webUrl: string,
+  fallbackName: string,
+): Promise<EmailAttachment | null> {
+  const downloadUrl = sharePointDownloadUrl(webUrl);
+  if (!downloadUrl) return null;
+  try {
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      console.warn(`Téléchargement du contrat refusé (${response.status}).`);
+      return null;
+    }
+    // Une page de connexion SharePoint répond 200 avec du HTML : ce n'est pas
+    // le document, il ne faut pas l'envoyer en pièce jointe.
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/html")) {
+      console.warn("Téléchargement du contrat : réponse HTML (session requise).");
+      return null;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > MAX_CONTRACT_ATTACHMENT_BYTES) {
+      console.warn(`Contrat non joint : taille inattendue (${bytes.length} octets).`);
+      return null;
+    }
+    return {
+      filename: contractFileName(webUrl, fallbackName),
+      content: bytesToBase64(bytes),
+    };
+  } catch (error) {
+    console.warn("Téléchargement du contrat impossible :", error);
+    return null;
+  }
 }
 
 export const listEmployees = query({
@@ -392,9 +513,12 @@ export const recordContractWebhook = internalMutation({
       payload: v.object({
         genre_salarie: v.string(),
         nom_prenom_salarie: v.string(),
+        Nom_contrat: v.string(),
+        nom_contrat: v.string(),
         adresse_salarie: v.string(),
         num_sec_sociale: v.string(),
         structure: v.string(),
+        numero_contrat: v.string(),
         type_contrat: v.string(),
         type_document: v.string(),
         date_fin_contrat: v.string(),
@@ -457,7 +581,35 @@ export const generateContract = action({
       throw new Error(`Webhook Make en échec (${response.status}).`);
     }
 
-    return { ok: true };
+    const contractUrl = sharePointUrlFromWebhookResponse(responseText);
+
+    // Les structures MES et LSDB n'ont pas de RH sur place : la direction reçoit
+    // le contrat par email dès qu'il est généré. Une notification en échec ne
+    // doit jamais faire échouer la génération elle-même.
+    if (CONTRACT_NOTICE_STRUCTURES.has(payload.structure)) {
+      try {
+        const attachment = contractUrl
+          ? await fetchContractAttachment(contractUrl, payload.nom_contrat)
+          : null;
+        await ctx.runAction(internal.mesoutilsEmails.sendContractGeneratedEmail, {
+          employeeName: payload.nom_prenom_salarie,
+          structureLabel: employee.structure,
+          documentLabel: DOCUMENT_LABELS[payload.type_document] ?? "Contrat",
+          contractType: payload.type_contrat,
+          numeroContrat: payload.numero_contrat,
+          poste: payload.poste,
+          dateDebut: payload.date_debut_contrat,
+          dateFin: payload.date_fin_contrat,
+          requestedBy,
+          contractUrl: contractUrl ?? undefined,
+          attachment: attachment ?? undefined,
+        });
+      } catch (error) {
+        console.error("Notification du contrat par email impossible :", error);
+      }
+    }
+
+    return { ok: true, contractUrl };
   },
 });
 
@@ -524,8 +676,8 @@ export const importEmployeesFromLegacyCsv = mutation({
           socialSecurityNumber: row.socialSecurityNumber,
           gender:
             (row.genderLabel.trim().toLowerCase() === "madame"
-              ? "femme"
-              : "homme") as "homme" | "femme",
+              ? "Madame"
+              : "Monsieur") as "Monsieur" | "Madame",
           address: row.address.trim(),
           structure,
           firstContractDate: row.firstContractDate?.trim() || undefined,

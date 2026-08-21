@@ -14,8 +14,9 @@ import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
-import { resendSend, storageImageUrl, type EmailAttachment } from "./emails";
+import { bytesToBase64, resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
+import { resolveActingProfile } from "./bennesproProfiles";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
@@ -737,10 +738,14 @@ export const createDepot = mutation({
     attachments: v.array(v.id("_storage")),
     comment: v.optional(v.string()),
     signature: v.id("_storage"),
+    /** Profil choisi à l'ouverture, sur un compte partagé par plusieurs personnes. */
+    profileId: v.optional(v.id("bpProfiles")),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "bennespro:depots", "create");
     const identity = await requireUser(ctx);
+    const { profileId, ...depotArgs } = args;
+    const actingProfile = await resolveActingProfile(ctx, profileId);
     // Dernier numéro via l'index (évite de charger toute la table).
     const last = await ctx.db
       .query("bpDepots")
@@ -752,10 +757,11 @@ export const createDepot = mutation({
     const billing = await buildBilling(ctx, args.items);
 
     const depotId = await ctx.db.insert("bpDepots", {
-      ...args,
+      ...depotArgs,
       depotNumber,
       billing,
       createdBy: identity.email ?? undefined,
+      ...actingProfile,
       createdAt: Date.now(),
     });
     if (billing) {
@@ -1340,16 +1346,6 @@ export const deleteCompany = action({
     return null;
   },
 });
-
-/** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
 
 /**
  * Envoie la facture par email à l'entreprise du dépôt : lien de paiement dans

@@ -307,6 +307,12 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     <td className="px-4 py-3 font-medium text-[var(--foreground)]">{d.companyName}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-[var(--muted-foreground)]">
                       {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                      {/* Compte partagé : qui a saisi le dépôt. */}
+                      {d.createdByProfile && (
+                        <span className="block text-xs opacity-80">
+                          {d.createdByProfile}
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-[var(--foreground)]">
                       {weight > 0 ? `${KG.format(weight)} kg` : <span className="text-xs text-[var(--muted-foreground)]">—</span>}

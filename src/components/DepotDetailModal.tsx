@@ -98,6 +98,10 @@ export function DepotDetailModal({
               <Info label="Déposant" value={depot.depositorName} />
               <Info label="Réf. chantier" value={depot.siteRef} />
               <Info label="Date" value={new Date(depot.createdAt).toLocaleString("fr-FR")} />
+              {/* Compte partagé : qui, derrière le compte, a saisi ce dépôt. */}
+              {depot.createdByProfile && (
+                <Info label="Enregistré par" value={depot.createdByProfile} />
+              )}
               {depot.billing ? (
                 <div className="sm:col-span-2">
                   <p className="text-xs text-[var(--muted-foreground)]">Facturation ({depot.billing.weightKg} kg)</p>

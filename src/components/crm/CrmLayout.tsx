@@ -13,6 +13,7 @@ import {
   Recycle,
   Sun,
   Truck,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { NewDepotWizard } from "../NewDepotWizard";
 import { CompanyModal } from "../CompanyModal";
 import { api } from "../../../convex/_generated/api";
 import { useTheme } from "../../lib/useTheme";
+import { ProfileProvider, useProfileContext } from "../../lib/profile";
 
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(42,167,155,0.25)]";
 
@@ -88,10 +90,14 @@ function ConvexAuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"
     );
   }
 
+  // Le sélecteur de profils vit sous l'authentification Convex : il interroge
+  // le backend, et un visiteur anonyme du portail public n'a rien à y faire.
   return (
     <>
       <ProfileSync />
-      <AuthenticatedShell theme={theme} setTheme={setTheme} />
+      <ProfileProvider>
+        <AuthenticatedShell theme={theme} setTheme={setTheme} />
+      </ProfileProvider>
     </>
   );
 }
@@ -168,7 +174,13 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     );
   }
 
+  const { usesProfiles, profile, setProfile } = useProfileContext();
   const navItems = NAV_ITEMS.filter((item) => !item.pageKey || canAccess(access, item.pageKey, "read"));
+  // L'onglet « Profils » n'a de sens que sur un compte partagé par plusieurs
+  // personnes : ailleurs, il n'y a rien à y gérer.
+  if (usesProfiles) {
+    navItems.push({ to: "/crm/profils", label: "Profils", icon: Users });
+  }
 
   const sidebar = (
     <SidebarContent
@@ -179,6 +191,8 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       userName={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
       userEmail={user?.primaryEmailAddress?.emailAddress}
       userImage={user?.imageUrl}
+      profileName={profile?.name}
+      onSwitchProfile={usesProfiles ? () => setProfile(null) : undefined}
     />
   );
 
@@ -249,6 +263,8 @@ function SidebarContent({
   userName,
   userEmail,
   userImage,
+  profileName,
+  onSwitchProfile,
 }: {
   navItems: typeof NAV_ITEMS;
   theme: "light" | "dark";
@@ -257,6 +273,8 @@ function SidebarContent({
   userName: string;
   userEmail?: string;
   userImage?: string | null;
+  profileName?: string;
+  onSwitchProfile?: () => void;
 }) {
   return (
     <>
@@ -297,6 +315,19 @@ function SidebarContent({
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {theme === "dark" ? "Mode clair" : "Mode sombre"}
         </button>
+        {profileName && (
+          <button
+            type="button"
+            onClick={onSwitchProfile}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          >
+            <Users className="h-4 w-4" />
+            <span className="min-w-0 flex-1 truncate text-left">
+              Profil : {profileName}
+            </span>
+            <span className="text-xs opacity-70">Changer</span>
+          </button>
+        )}
         <div className="flex items-center gap-1.5">
           <Link
             to="/crm/compte"

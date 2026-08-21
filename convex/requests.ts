@@ -5,6 +5,7 @@ import {
   mutation,
   query,
   MutationCtx,
+  QueryCtx,
 } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -29,7 +30,10 @@ import {
   requestLostReason,
   requestType,
 } from "./schema";
-import { isAwaitingInvoicePayment, resolveProcess } from "./processes";
+import { PICKUP_DEADLINE_DAYS } from "./emails";
+import { isAwaitingInvoicePayment, resolveProcess, STEP } from "./processes";
+import { applyDiscount, assertUsableDiscount } from "./discountCodes";
+import { scheduleStripeSync } from "./stripeCatalog";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -126,7 +130,7 @@ async function createNewRequestNotification(
   ctx: MutationCtx,
   args: {
     requestId: Id<"requests">;
-    requestType: "aerogommage" | "collecte" | "article" | "velo" | "livraison";
+    requestType: "aerogommage" | "collecte" | "article" | "velo" | "livraison" | "depot";
     customerName: string;
   },
 ) {
@@ -140,9 +144,11 @@ async function createNewRequestNotification(
     createdAt: Date.now(),
   });
 
-  // Email de confirmation au client (Resend).
+  // Email de confirmation au client (Resend). Une commande déjà réglée en ligne
+  // reçoit un message d'achat, avec le délai de retrait de 5 jours.
   const request = await ctx.db.get(args.requestId);
   if (request?.customer.email) {
+    const paid = request.payment?.status === "paid";
     await ctx.scheduler.runAfter(0, internal.emails.sendRequestConfirmation, {
       email: request.customer.email,
       name: customerFullName(request.customer),
@@ -150,6 +156,11 @@ async function createNewRequestNotification(
       type: request.type,
       requestId: String(request._id),
       article: await emailArticlePreview(ctx, request),
+      paid,
+      pickupDeadline: paid
+        ? (request.payment?.paidAt ?? request.createdAt) +
+          PICKUP_DEADLINE_DAYS * 24 * 60 * 60 * 1000
+        : undefined,
     });
   }
 
@@ -166,10 +177,86 @@ async function createNewRequestNotification(
   }
 }
 
-async function generateReference(ctx: MutationCtx): Promise<string> {
+export async function generateReference(ctx: MutationCtx): Promise<string> {
   const all = await ctx.db.query("requests").collect();
   const n = all.length + 1;
   return n.toString().padStart(6, "0");
+}
+
+/**
+ * Demande créée par une vente au comptoir (caisse).
+ *
+ * Le client est devant nous, il repart avec l'objet : la demande naît donc
+ * ACHEVÉE — « Paiement validé » puis « Retrait effectué » cochés, issue
+ * « gagnée ». Elle ne sert pas à piloter un travail restant mais à nourrir
+ * l'historique du client, exactement comme une commande en ligne retirée.
+ */
+export async function createInShopSaleRequest(
+  ctx: MutationCtx,
+  args: {
+    customer: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      address?: string;
+      postalCode?: string;
+      city?: string;
+    };
+    articles: Array<{ articleId: Id<"articles">; articleTitle: string }>;
+    total: number;
+    paymentMethod: "cb" | "especes";
+    receiptNumber?: string;
+    stripePaymentIntentId?: string;
+  },
+): Promise<Id<"requests">> {
+  const customer = normalizeCustomer(args.customer);
+  const steps = resolveProcess("article");
+  const reference = await generateReference(ctx);
+  const now = Date.now();
+
+  const requestId = await ctx.db.insert("requests", {
+    type: "article",
+    stage: "nouveau",
+    outcome: "gagnee",
+    requestOrigin: "internal",
+    complete: isArticleComplete(customer),
+    processSteps: steps,
+    // Vente en personne : les deux jalons sont franchis d'un coup.
+    completedSteps: steps.length,
+    processLog: steps.map((_, index) => ({
+      step: index,
+      by: "Caisse",
+      at: now,
+    })),
+    customer,
+    comment: args.receiptNumber
+      ? `Vente en boutique — ticket ${args.receiptNumber}.`
+      : "Vente en boutique.",
+    photos: [],
+    article: args.articles[0],
+    articles: args.articles,
+    quoteAmount: args.total,
+    payment: {
+      method: args.paymentMethod,
+      status: "paid",
+      validated: true,
+      captured: true,
+      ...(args.stripePaymentIntentId
+        ? {
+            provider: "stripe" as const,
+            stripePaymentIntentId: args.stripePaymentIntentId,
+          }
+        : {}),
+      paidAt: now,
+    },
+    createdAt: now,
+    updatedAt: now,
+    reference,
+  });
+
+  await upsertRequestCustomer(ctx, customer, "/crm/caisse");
+  return requestId;
 }
 
 async function upsertRequestCustomer(
@@ -321,6 +408,13 @@ export const submitAerogommage = mutation({
   },
   handler: async (ctx, { customer, comment, photos, items, options }) => {
     await requireUser(ctx);
+    // Sans photo, impossible de chiffrer un décapage : la règle est portée ici
+    // et pas seulement dans le formulaire, sinon un envoi direct la contourne.
+    if (items.some((item) => (item.photos?.length ?? 0) === 0) && photos.length === 0) {
+      throw new Error(
+        "Ajoutez au moins une photo pour chaque objet à décaper : sans photo, la demande ne peut pas être chiffrée.",
+      );
+    }
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -396,6 +490,20 @@ export const submitCollecte = mutation({
   },
   handler: async (ctx, { customer, comment, photos, details }) => {
     await requireUser(ctx);
+    // Idem collecte : la demande doit être illustrée, sinon on ne sait pas ce
+    // qu'il y a à charger. Contrôle côté serveur, pas uniquement dans le
+    // formulaire (une demande sans aucune photo est déjà passée).
+    const collectePhotoCount =
+      photos.length +
+      (details.categoryPhotos ?? []).reduce(
+        (total, entry) => total + entry.photos.length,
+        0,
+      );
+    if (collectePhotoCount === 0) {
+      throw new Error(
+        "Ajoutez au moins une photo des objets à collecter : sans photo, la demande ne peut pas être traitée.",
+      );
+    }
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -481,6 +589,406 @@ export const submitVelo = mutation({
   },
 });
 
+/* ─── Dépôt en recyclerie ────────────────────────────────────────────────── */
+
+/**
+ * Créneaux de dépôt : uniquement le lundi, par tranches d'une heure.
+ * Un seul rendez-vous par créneau et par recyclerie.
+ */
+/** Premier et dernier créneau (minutes depuis minuit, heure de Paris). */
+const DEPOT_FIRST_SLOT_MINUTE = 13 * 60 + 30;
+const DEPOT_LAST_SLOT_MINUTE = 16 * 60 + 40;
+/** Un rendez-vous toutes les 10 minutes. */
+const DEPOT_SLOT_MINUTES = 10;
+
+/** Minutes depuis minuit de chaque créneau proposé, dans l'ordre. */
+const DEPOT_SLOT_MINUTE_MARKS = (() => {
+  const marks: number[] = [];
+  for (
+    let minute = DEPOT_FIRST_SLOT_MINUTE;
+    minute <= DEPOT_LAST_SLOT_MINUTE;
+    minute += DEPOT_SLOT_MINUTES
+  ) {
+    marks.push(minute);
+  }
+  return marks;
+})();
+
+/** « 13:30 » à partir des minutes depuis minuit. */
+function depotSlotLabel(minuteOfDay: number) {
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+/** Nombre de lundis proposés à la réservation. */
+const DEPOT_WEEKS_AHEAD = 8;
+
+/** Décalage (ms) entre l'heure de Paris et UTC à un instant donné. */
+function parisOffsetMs(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Paris",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour") % 24,
+    get("minute"),
+    get("second"),
+  );
+  return asUtc - timestamp;
+}
+
+/** Horodatage d'une heure locale de Paris (gère l'heure d'été). */
+function parisTimestamp(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0,
+) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  // Deux passes : la première corrige le décalage, la seconde absorbe un
+  // éventuel changement d'heure entre l'estimation et l'instant corrigé.
+  const first = guess - parisOffsetMs(guess);
+  return guess - parisOffsetMs(first);
+}
+
+/** Champs calendaires d'un horodatage, exprimés à Paris. */
+function parisParts(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    hour12: false,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    weekday: get("weekday"),
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")) % 24,
+    minute: Number(get("minute")),
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+  };
+}
+
+/** Les prochains lundis (dates Paris) proposés à la réservation. */
+function upcomingMondays(from: number) {
+  const days: Array<{ year: number; month: number; day: number }> = [];
+  const start = parisParts(from);
+  const cursor = Date.UTC(start.year, start.month - 1, start.day);
+  for (let offset = 0; days.length < DEPOT_WEEKS_AHEAD; offset += 1) {
+    const dayUtc = cursor + offset * 86_400_000;
+    const date = new Date(dayUtc);
+    // getUTCDay : 1 = lundi. La date est déjà exprimée en jours de Paris.
+    if (date.getUTCDay() !== 1) continue;
+    days.push({
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+    });
+  }
+  return days;
+}
+
+/** Rendez-vous déjà pris pour une recyclerie (créneaux à venir uniquement). */
+async function bookedDepotSlots(ctx: QueryCtx | MutationCtx, site: "60" | "76", from: number) {
+  const requests = await ctx.db
+    .query("requests")
+    .withIndex("by_type", (q) => q.eq("type", "depot"))
+    .collect();
+  return new Set(
+    requests
+      .filter(
+        (request) =>
+          request.depot?.site === site &&
+          request.outcome !== "perdue" &&
+          (request.depot?.slotStart ?? 0) >= from,
+      )
+      .map((request) => request.depot!.slotStart),
+  );
+}
+
+/**
+ * Créneaux de dépôt proposés au client : les prochains lundis, avec pour
+ * chaque heure l'information « déjà réservé » calculée côté serveur — c'est la
+ * même source que la validation de `submitDepot`, donc l'affichage ne peut pas
+ * proposer un créneau que la mutation refusera.
+ */
+/** Fermetures saisies par l'équipe pour une recyclerie. */
+async function depotBlocks(ctx: QueryCtx | MutationCtx, site: "60" | "76") {
+  const blocks = await ctx.db
+    .query("depotBlockedSlots")
+    .withIndex("by_site", (q) => q.eq("site", site))
+    .collect();
+  return {
+    days: new Set(blocks.filter((b) => b.slotStart === undefined).map((b) => b.date)),
+    slots: new Set(
+      blocks
+        .filter((b) => b.slotStart !== undefined)
+        .map((b) => b.slotStart as number),
+    ),
+  };
+}
+
+export const depotSlots = query({
+  args: { site: v.union(v.literal("60"), v.literal("76")) },
+  handler: async (ctx, { site }) => {
+    const now = Date.now();
+    const booked = await bookedDepotSlots(ctx, site, now);
+    const blocked = await depotBlocks(ctx, site);
+    return upcomingMondays(now).map((day) => {
+      const date = `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`;
+      const dayBlocked = blocked.days.has(date);
+      return {
+        date,
+        dayBlocked,
+        slots: DEPOT_SLOT_MINUTE_MARKS.map((minuteOfDay) => {
+          const start = parisTimestamp(
+            day.year,
+            day.month,
+            day.day,
+            Math.floor(minuteOfDay / 60),
+            minuteOfDay % 60,
+          );
+          const isBooked = booked.has(start);
+          const isBlocked = dayBlocked || blocked.slots.has(start);
+          return {
+            start,
+            end: start + DEPOT_SLOT_MINUTES * 60_000,
+            label: depotSlotLabel(minuteOfDay),
+            booked: isBooked,
+            blocked: isBlocked,
+            available: start > now && !isBooked && !isBlocked,
+          };
+        }),
+      };
+    });
+  },
+});
+
+/**
+ * Ouvre ou ferme une journée / un créneau de dépôt.
+ *
+ * Fermer une journée masque tous ses créneaux d'un coup ; les rendez-vous déjà
+ * pris ne sont pas annulés pour autant — l'équipe les voit toujours dans
+ * l'onglet Dépôts et reste libre de les traiter.
+ */
+export const setDepotAvailability = mutation({
+  args: {
+    site: v.union(v.literal("60"), v.literal("76")),
+    date: v.string(),
+    /** Absent : c'est la journée entière qui est ouverte/fermée. */
+    slotStart: v.optional(v.number()),
+    blocked: v.boolean(),
+  },
+  handler: async (ctx, { site, date, slotStart, blocked }) => {
+    await requireCrmPermission(ctx, "calendrier", "update");
+    const identity = await requireUser(ctx);
+
+    const existing = (
+      await ctx.db
+        .query("depotBlockedSlots")
+        .withIndex("by_site_and_date", (q) => q.eq("site", site).eq("date", date))
+        .collect()
+    ).filter((block) => block.slotStart === slotStart);
+
+    if (!blocked) {
+      for (const block of existing) await ctx.db.delete(block._id);
+      // Rouvrir un créneau précis n'a pas de sens si toute la journée est
+      // fermée : on lève aussi la fermeture de la journée.
+      if (slotStart !== undefined) {
+        const dayBlocks = (
+          await ctx.db
+            .query("depotBlockedSlots")
+            .withIndex("by_site_and_date", (q) => q.eq("site", site).eq("date", date))
+            .collect()
+        ).filter((block) => block.slotStart === undefined);
+        for (const block of dayBlocks) await ctx.db.delete(block._id);
+      }
+      return { blocked: false };
+    }
+
+    if (existing.length > 0) return { blocked: true };
+    await ctx.db.insert("depotBlockedSlots", {
+      site,
+      date,
+      slotStart,
+      createdAt: Date.now(),
+      createdBy: identity.name ?? identity.email ?? identity.subject,
+    });
+    return { blocked: true };
+  },
+});
+
+export const submitDepot = mutation({
+  args: {
+    customer: customerArg,
+    comment: v.optional(v.string()),
+    photos: v.array(v.id("_storage")),
+    details: v.object({
+      site: v.union(v.literal("60"), v.literal("76")),
+      slotStart: v.number(),
+      vehicleType: v.union(
+        v.literal("voiture"),
+        v.literal("camionnette"),
+        v.literal("remorque"),
+      ),
+      description: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, { customer, comment, photos, details }) => {
+    await requireUser(ctx);
+
+    // Le créneau est revalidé ici : un client peut avoir gardé la page ouverte
+    // pendant qu'un autre réservait le même lundi.
+    const now = Date.now();
+    const slot = parisParts(details.slotStart);
+    if (slot.weekday !== "Mon") {
+      throw new Error("Les dépôts se font uniquement le lundi.");
+    }
+    if (!DEPOT_SLOT_MINUTE_MARKS.includes(slot.hour * 60 + slot.minute)) {
+      throw new Error("Ce créneau n'est pas proposé.");
+    }
+    if (details.slotStart <= now) {
+      throw new Error("Ce créneau est déjà passé.");
+    }
+    const booked = await bookedDepotSlots(ctx, details.site, now);
+    if (booked.has(details.slotStart)) {
+      throw new Error("Ce créneau vient d'être réservé. Choisissez-en un autre.");
+    }
+
+    const resolvedCustomer = await upsertRequestCustomer(ctx, customer, "/depot");
+    customer = resolvedCustomer.customer;
+    const reference = await generateReference(ctx);
+    const requestId = await ctx.db.insert("requests", {
+      type: "depot",
+      stage: "planifie",
+      outcome: "open",
+      requestOrigin: "external",
+      // Un dépôt est complet dès l'envoi : créneau, site et véhicule sont requis.
+      complete: true,
+      processSteps: resolveProcess("depot"),
+      completedSteps: 0,
+      customer,
+      userId: resolvedCustomer.userId,
+      site: details.site,
+      // Le créneau choisi pilote aussi le calendrier du CRM.
+      scheduledDate: details.slotStart,
+      comment,
+      photos,
+      depot: {
+        site: details.site,
+        slotStart: details.slotStart,
+        slotEnd: details.slotStart + DEPOT_SLOT_MINUTES * 60_000,
+        vehicleType: details.vehicleType,
+        description: details.description || undefined,
+      },
+      createdAt: now,
+      updatedAt: now,
+      reference,
+    });
+    await createNewRequestNotification(ctx, {
+      requestId,
+      requestType: "depot",
+      customerName: customerFullName(customer),
+    });
+    return requestId;
+  },
+});
+
+/** Libellé public d'une recyclerie, pour les emails et l'espace client. */
+const DEPOT_SITE_LABELS: Record<"60" | "76", string> = {
+  "60": "Recyclerie du Pays de Bray 60",
+  "76": "Recyclerie de Gournay en Bray 76",
+};
+
+/**
+ * Annulation de son propre créneau de dépôt par le client.
+ *
+ * Le créneau est immédiatement rendu à la réservation : `bookedDepotSlots`
+ * ignore les demandes perdues.
+ */
+export const cancelMyDepot = mutation({
+  args: { id: v.id("requests") },
+  handler: async (ctx, { id }) => {
+    const identity = await requireUser(ctx);
+    const request = await ctx.db.get(id);
+    if (!request || request.type !== "depot") throw new Error("Dépôt introuvable.");
+
+    const ownsByAccount = request.userId === identity.subject;
+    const ownsByEmail =
+      normalizeEmail(request.customer.email) === normalizeEmail(identity.email ?? "");
+    if (!ownsByAccount && !ownsByEmail) throw new Error("Annulation non autorisée.");
+    if (request.outcome === "perdue") return { cancelled: true };
+
+    await ctx.db.patch(id, {
+      outcome: "perdue",
+      lostReason: "annulation_client",
+      updatedAt: Date.now(),
+    });
+    return { cancelled: true };
+  },
+});
+
+/**
+ * Cron quotidien : rappel de dépôt la veille du rendez-vous.
+ *
+ * `reminderSentAt` est posé après l'envoi, donc un client n'est prévenu qu'une
+ * fois même si le cron repasse ou si la fenêtre du lendemain est recalculée.
+ */
+export const sendDepotReminders = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ sent: number }> => {
+    const now = Date.now();
+    const tomorrow = parisParts(now + 86_400_000);
+    const dayStart = parisTimestamp(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0);
+    const dayEnd = dayStart + 86_400_000;
+
+    const depots = await ctx.db
+      .query("requests")
+      .withIndex("by_type", (q) => q.eq("type", "depot"))
+      .collect();
+
+    let sent = 0;
+    for (const request of depots) {
+      const detail = request.depot;
+      if (!detail || detail.reminderSentAt) continue;
+      if (request.outcome === "perdue") continue;
+      if (detail.slotStart < dayStart || detail.slotStart >= dayEnd) continue;
+      const email = request.customer.email?.trim();
+      if (!email) continue;
+
+      await ctx.scheduler.runAfter(0, internal.emails.sendDepotReminder, {
+        email,
+        name: customerFullName(request.customer),
+        requestId: String(request._id),
+        siteLabel: DEPOT_SITE_LABELS[detail.site],
+        slotStart: detail.slotStart,
+      });
+      await ctx.db.patch(request._id, {
+        depot: { ...detail, reminderSentAt: now },
+      });
+      sent += 1;
+    }
+    return { sent };
+  },
+});
+
 export const submitLivraison = mutation({
   args: {
     customer: customerArg,
@@ -559,6 +1067,7 @@ export const submitArticleReservation = mutation({
     const reference = await generateReference(ctx);
     // L'article passe en « réservé » dès la demande.
     await ctx.db.patch(articleId, { status: "reserve" });
+    await scheduleStripeSync(ctx, articleId);
     const requestId = await ctx.db.insert("requests", {
       type: "article",
       stage: "nouveau",
@@ -623,6 +1132,7 @@ export const submitArticleCartReservation = mutation({
     const reference = await generateReference(ctx);
     for (const articleId of uniqueArticleIds) {
       await ctx.db.patch(articleId, { status: "reserve" });
+      await scheduleStripeSync(ctx, articleId);
     }
 
     const requestId = await ctx.db.insert("requests", {
@@ -663,8 +1173,9 @@ export const createPublicStripeCheckoutDraft = internalMutation({
     customer: customerArg,
     comment: v.optional(v.string()),
     articleIds: v.array(v.id("articles")),
+    discountCode: v.optional(v.string()),
   },
-  handler: async (ctx, { customer, comment, articleIds }) => {
+  handler: async (ctx, { customer, comment, articleIds, discountCode }) => {
     customer = normalizeCustomer(customer);
     const uniqueArticleIds = Array.from(new Set(articleIds));
     if (uniqueArticleIds.length === 0) {
@@ -681,15 +1192,34 @@ export const createPublicStripeCheckoutDraft = internalMutation({
       total += article.price;
     }
 
+    // La remise est relue depuis le bon lui-même : le navigateur n'envoie
+    // qu'un code, jamais un pourcentage ni un montant.
+    let discountCodeId: Id<"discountCodes"> | undefined;
+    let discountPercent: number | undefined;
+    let discountAmount: number | undefined;
+    let payable = total;
+    if (discountCode?.trim()) {
+      const discount = await assertUsableDiscount(ctx, discountCode);
+      const applied = applyDiscount(total, discount.percent);
+      discountCodeId = discount._id;
+      discountPercent = discount.percent;
+      discountAmount = applied.discountAmount;
+      payable = applied.total;
+    }
+
     const draftId = await ctx.db.insert("publicStripeCheckoutDrafts", {
       articleIds: uniqueArticleIds,
       customer,
       comment,
-      total,
+      total: payable,
+      subtotal: total,
+      discountCodeId,
+      discountPercent,
+      discountAmount,
       status: "pending",
       createdAt: Date.now(),
     });
-    return { draftId, total };
+    return { draftId, total: payable, subtotal: total, discountPercent, discountAmount };
   },
 });
 
@@ -704,10 +1234,210 @@ export const attachStripeSessionToPublicDraft = internalMutation({
   },
 });
 
+/** Flux custom : mémorise le PaymentIntent dès sa création. */
+export const attachStripePaymentIntentToPublicDraft = internalMutation({
+  args: {
+    draftId: v.id("publicStripeCheckoutDrafts"),
+    stripePaymentIntentId: v.string(),
+  },
+  handler: async (ctx, { draftId, stripePaymentIntentId }) => {
+    await ctx.db.patch(draftId, { stripePaymentIntentId });
+  },
+});
+
+/**
+ * Avancement d'une demande boutique qui vient d'être payée.
+ *
+ * Le paiement ne solde PAS la demande : il ne coche que « Paiement validé ».
+ * La commande reste ouverte (colonne « Prestation planifiée » du CRM) tant que
+ * l'équipe n'a pas constaté le retrait en boutique. Les demandes créées avant
+ * l'introduction de ce process gardent leurs anciennes étapes : on les solde
+ * comme avant pour ne pas les laisser bloquées.
+ */
+function paidBoutiqueProgress(steps: string[]): {
+  completedSteps: number;
+  outcome: "open" | "gagnee";
+} {
+  const paidIndex = steps.indexOf(STEP.paiementValide);
+  if (paidIndex === -1) {
+    return { completedSteps: steps.length, outcome: "gagnee" };
+  }
+  const completedSteps = paidIndex + 1;
+  return {
+    completedSteps,
+    outcome: completedSteps >= steps.length ? "gagnee" : "open",
+  };
+}
+
+/**
+ * Encaissement d'un lien de paiement : marque les articles vendus et solde la
+ * demande liée — ou en crée une quand le lien a été généré depuis un article,
+ * sans demande préalable. Idempotent : rejouer l'appel ne crée rien de plus.
+ */
+export const finalizePaymentLink = internalMutation({
+  args: {
+    token: v.string(),
+    stripePaymentIntentId: v.string(),
+    customer: v.optional(customerArg),
+    comment: v.optional(v.string()),
+  },
+  handler: async (ctx, { token, stripePaymentIntentId, customer, comment }) => {
+    const link = await ctx.db
+      .query("paymentLinks")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .unique();
+    if (!link) throw new Error("Lien de paiement introuvable.");
+    if (link.status === "paid") {
+      return { requestId: link.requestId ?? null };
+    }
+
+    const now = Date.now();
+    const payment = {
+      method: "cb" as const,
+      status: "paid" as const,
+      validated: true,
+      captured: true,
+      provider: "stripe" as const,
+      stripePaymentIntentId,
+      paidAt: now,
+    };
+
+    const articles: Array<{ articleId: Id<"articles">; articleTitle: string }> = [];
+    for (const articleId of link.articleIds) {
+      const article = await ctx.db.get(articleId);
+      if (!article) continue;
+      articles.push({ articleId, articleTitle: article.title });
+      if (article.status !== "vendu") {
+        await ctx.db.patch(articleId, { status: "vendu" });
+        await scheduleStripeSync(ctx, articleId);
+      }
+    }
+
+    let requestId = link.requestId ?? null;
+    if (requestId) {
+      const request = await ctx.db.get(requestId);
+      if (!request) throw new Error("Demande introuvable.");
+      const progress = paidBoutiqueProgress(request.processSteps);
+      await ctx.db.patch(requestId, {
+        payment,
+        outcome: progress.outcome,
+        completedSteps: progress.completedSteps,
+        updatedAt: now,
+      });
+    } else {
+      // Lien généré depuis un article : on crée la demande boutique payée.
+      const linkCustomer = normalizeCustomer(
+        customer ?? link.customer ?? {
+          firstName: "Client",
+          lastName: "boutique",
+          email: "",
+          phone: "",
+        },
+      );
+      const steps = resolveProcess("article");
+      const progress = paidBoutiqueProgress(steps);
+      const reference = await generateReference(ctx);
+      requestId = await ctx.db.insert("requests", {
+        type: "article",
+        stage: "nouveau",
+        outcome: progress.outcome,
+        requestOrigin: "external",
+        complete: isArticleComplete(linkCustomer),
+        processSteps: steps,
+        completedSteps: progress.completedSteps,
+        customer: linkCustomer,
+        comment,
+        photos: [],
+        article: articles[0],
+        articles,
+        payment,
+        createdAt: now,
+        updatedAt: now,
+        reference,
+      });
+      await createNewRequestNotification(ctx, {
+        requestId,
+        requestType: "article",
+        customerName: customerFullName(linkCustomer),
+      });
+    }
+
+    await ctx.db.patch(link._id, {
+      status: "paid",
+      stripePaymentIntentId,
+      paidAt: now,
+      ...(customer && !link.customer ? { customer: normalizeCustomer(customer) } : {}),
+    });
+
+    return { requestId };
+  },
+});
+
+/* ─── Remboursement d'une commande boutique ──────────────────────────────── */
+
+/** Lit le paiement d'une demande pour l'action de remboursement Stripe. */
+export const paymentForRefund = internalQuery({
+  args: { requestId: v.id("requests") },
+  handler: async (ctx, { requestId }) => {
+    const request = await ctx.db.get(requestId);
+    if (!request) return null;
+    return {
+      payment: request.payment ?? null,
+      quoteAmount: request.quoteAmount,
+      reference: request.reference,
+      articleIds: requestArticleIds(request),
+    };
+  },
+});
+
+/**
+ * Enregistre le remboursement Stripe sur la demande.
+ *
+ * Le paiement reste marqué « payé » — il l'a bien été — mais porte désormais sa
+ * trace de remboursement, et la demande est fermée en « perdue » : la commande
+ * n'ira pas au bout. Les articles repartent en vente (« disponible ») puisque
+ * plus personne ne les a achetés.
+ */
+export const markRefunded = internalMutation({
+  args: {
+    requestId: v.id("requests"),
+    stripeRefundId: v.string(),
+    refundedAmount: v.number(),
+    refundedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, { requestId, stripeRefundId, refundedAmount, refundedBy }) => {
+    const request = await ctx.db.get(requestId);
+    if (!request) throw new Error("Demande introuvable.");
+    if (!request.payment) throw new Error("Cette demande n'a aucun paiement.");
+    const now = Date.now();
+    await ctx.db.patch(requestId, {
+      payment: {
+        ...request.payment,
+        stripeRefundId,
+        refundedAmount,
+        refundedAt: now,
+        refundedBy,
+      },
+      outcome: "perdue",
+      lostReason: "annulation_client",
+      updatedAt: now,
+    });
+    for (const articleId of requestArticleIds(request)) {
+      const article = await ctx.db.get(articleId);
+      if (article && article.status === "vendu") {
+        await ctx.db.patch(articleId, { status: "disponible" });
+        await scheduleStripeSync(ctx, articleId);
+      }
+    }
+    return null;
+  },
+});
+
 export const finalizePublicStripeCheckout = internalMutation({
   args: {
     draftId: v.id("publicStripeCheckoutDrafts"),
-    stripeSessionId: v.string(),
+    /** Flux Checkout hébergé. Absent pour le flux custom (Payment Element). */
+    stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
   },
   handler: async (ctx, { draftId, stripeSessionId, stripePaymentIntentId }) => {
@@ -718,8 +1448,19 @@ export const finalizePublicStripeCheckout = internalMutation({
       return { requestId: draft.requestId };
     }
 
-    if (draft.stripeSessionId && draft.stripeSessionId !== stripeSessionId) {
+    if (
+      stripeSessionId &&
+      draft.stripeSessionId &&
+      draft.stripeSessionId !== stripeSessionId
+    ) {
       throw new Error("Cette session Stripe ne correspond pas au panier en cours.");
+    }
+    if (
+      stripePaymentIntentId &&
+      draft.stripePaymentIntentId &&
+      draft.stripePaymentIntentId !== stripePaymentIntentId
+    ) {
+      throw new Error("Ce paiement Stripe ne correspond pas au panier en cours.");
     }
 
     const articles = [];
@@ -736,17 +1477,24 @@ export const finalizePublicStripeCheckout = internalMutation({
     const reference = await generateReference(ctx);
     for (const articleId of draft.articleIds) {
       await ctx.db.patch(articleId, { status: "vendu" });
+      await scheduleStripeSync(ctx, articleId);
     }
 
+    const discount = draft.discountCodeId
+      ? await ctx.db.get(draft.discountCodeId)
+      : null;
+    const discountCodeValue = discount?.code;
+
     const steps = resolveProcess("article");
+    const progress = paidBoutiqueProgress(steps);
     const requestId = await ctx.db.insert("requests", {
       type: "article",
       stage: "nouveau",
-      outcome: "gagnee",
+      outcome: progress.outcome,
       requestOrigin: "external",
       complete: isArticleComplete(draft.customer),
       processSteps: steps,
-      completedSteps: steps.length,
+      completedSteps: progress.completedSteps,
       customer: draft.customer,
       comment: draft.comment || undefined,
       photos: [],
@@ -761,11 +1509,28 @@ export const finalizePublicStripeCheckout = internalMutation({
         stripeSessionId,
         stripePaymentIntentId,
         paidAt: now,
+        ...(draft.discountPercent !== undefined
+          ? {
+              discountCode: discountCodeValue,
+              discountPercent: draft.discountPercent,
+              discountAmount: draft.discountAmount,
+              subtotal: draft.subtotal,
+            }
+          : {}),
       },
       createdAt: now,
       updatedAt: now,
       reference,
     });
+
+    if (discount && discount.status !== "used") {
+      await ctx.db.patch(discount._id, {
+        status: "used",
+        usedAt: now,
+        usedByRequestId: requestId,
+        discountAmount: draft.discountAmount,
+      });
+    }
 
     await createNewRequestNotification(ctx, {
       requestId,
@@ -774,8 +1539,8 @@ export const finalizePublicStripeCheckout = internalMutation({
     });
 
     await ctx.db.patch(draftId, {
-      stripeSessionId,
-      stripePaymentIntentId,
+      ...(stripeSessionId ? { stripeSessionId } : {}),
+      ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
       status: "completed",
       requestId,
       completedAt: Date.now(),
@@ -802,7 +1567,11 @@ export const list = query({
           .order("desc")
           .collect()
       : await ctx.db.query("requests").order("desc").collect();
-    return all.map((r) => ({ ...r, customer: normalizeCustomer(r.customer) }));
+    // Un dépôt n'est pas une demande à traiter : c'est un rendez-vous, il vit
+    // dans l'onglet « Dépôts » du calendrier et pas sur le tableau des demandes.
+    return all
+      .filter((r) => r.type !== "depot")
+      .map((r) => ({ ...r, customer: normalizeCustomer(r.customer) }));
   },
 });
 
@@ -950,6 +1719,7 @@ export const setOutcome = mutation({
             : "reserve";
       for (const articleId of requestArticleIds(request)) {
         await ctx.db.patch(articleId, { status: articleStatus });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
   },
@@ -1035,6 +1805,7 @@ export const deleteForever = mutation({
         const article = await ctx.db.get(articleId);
         if (article?.status === "reserve") {
           await ctx.db.patch(articleId, { status: "disponible" });
+          await scheduleStripeSync(ctx, articleId);
           articleReservationsReleased++;
         }
       }
@@ -1389,6 +2160,7 @@ export const advanceProcess = mutation({
     if (done && r.type === "article") {
       for (const articleId of requestArticleIds(r)) {
         await ctx.db.patch(articleId, { status: "vendu" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
     // La facture vient d'être éditée et « Facture réglée » est l'étape
@@ -1427,6 +2199,7 @@ export const retreatProcess = mutation({
     if (r.outcome === "gagnee" && r.type === "article") {
       for (const articleId of requestArticleIds(r)) {
         await ctx.db.patch(articleId, { status: "reserve" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
   },
@@ -1750,6 +2523,7 @@ export const createInternal = mutation({
       if (!article) throw new Error("Article introuvable.");
       if (article.status !== "disponible") throw new Error("Cet article n'est plus disponible.");
       await ctx.db.patch(articleId, { status: "reserve" });
+      await scheduleStripeSync(ctx, articleId);
       const id = await ctx.db.insert("requests", {
         type: "article",
         stage: "nouveau",
@@ -1811,10 +2585,45 @@ export const scheduled = query({
         q.gte("scheduledDate", from).lte("scheduledDate", to),
       )
       .collect();
-    return requests.map((request) => ({
-      ...request,
-      customer: normalizeCustomer(request.customer),
-    }));
+    return requests
+      .filter((request) => request.type !== "depot")
+      .map((request) => ({
+        ...request,
+        customer: normalizeCustomer(request.customer),
+      }));
+  },
+});
+
+/**
+ * Rendez-vous de dépôt d'une période, pour l'onglet « Dépôts » du calendrier.
+ *
+ * Requête séparée de `scheduled` : les dépôts sont volontairement absents du
+ * tableau et du calendrier des demandes, et ont leur propre vue.
+ */
+export const scheduledDepots = query({
+  args: {
+    from: v.number(),
+    to: v.number(),
+    /** Restreint à une recyclerie ; absent = les deux. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+  },
+  handler: async (ctx, { from, to, site }) => {
+    await requireCrmPermission(ctx, "calendrier", "read");
+    const depots = await ctx.db
+      .query("requests")
+      .withIndex("by_type", (q) => q.eq("type", "depot"))
+      .collect();
+    return depots
+      .filter((request) => {
+        if (site && request.depot?.site !== site) return false;
+        const slotStart = request.depot?.slotStart ?? 0;
+        return slotStart >= from && slotStart <= to;
+      })
+      .sort((a, b) => (a.depot?.slotStart ?? 0) - (b.depot?.slotStart ?? 0))
+      .map((request) => ({
+        ...request,
+        customer: normalizeCustomer(request.customer),
+      }));
   },
 });
 
@@ -1867,3 +2676,4 @@ export const sendPendingInvoicesDigest = internalAction({
     return { count: requests.length };
   },
 });
+
