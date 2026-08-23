@@ -100,7 +100,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   // Tant que la réponse n'est pas là, on ne bloque pas l'app : un compte
   // ordinaire ne doit jamais voir passer d'écran de sélection.
-  if (usesProfiles && !profile) {
+  //
+  // Et on ne bloque JAMAIS sur une liste vide : un compte partagé dont les
+  // profils n'ont pas encore été créés se retrouverait enfermé devant un écran
+  // sans issue, l'onglet qui permet d'en créer étant derrière. Sans profil,
+  // l'app fonctionne comme avant — les dépôts portent la seule adresse email.
+  if (usesProfiles && !profile && profiles.length > 0) {
     return <ProfilePicker profiles={profiles} onPick={setProfile} />;
   }
 
