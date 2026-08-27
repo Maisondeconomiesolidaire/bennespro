@@ -27,6 +27,10 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
   const settings = useQuery(api.bennespro.getDibSettings);
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const [search, setSearch] = useState("");
+  // Plage horaire de saisie, bornes incluses : « 8 » à « 12 » retient tout ce
+  // qui a été déposé de 08h00 à 12h59.
+  const [fromHour, setFromHour] = useState("");
+  const [toHour, setToHour] = useState("");
 
   const [editingPrice, setEditingPrice] = useState(false);
   const [priceInput, setPriceInput] = useState("");
@@ -40,17 +44,43 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
       : list;
   }, [depots, dibOnly]);
 
+  const hourRange = useMemo(() => {
+    const parse = (value: string) => {
+      const hour = Number.parseInt(value, 10);
+      return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+    };
+    const from = parse(fromHour);
+    const to = parse(toHour);
+    // Bornes inversées (« de 17h à 8h ») : on les remet dans l'ordre plutôt que
+    // de renvoyer une liste vide sans expliquer pourquoi.
+    if (from !== null && to !== null && from > to) return { from: to, to: from };
+    return { from, to };
+  }, [fromHour, toHour]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return source;
-    return source.filter(
-      (d) =>
-        d.companyName.toLowerCase().includes(q) ||
-        d.depositorName.toLowerCase().includes(q) ||
-        d.siteRef.toLowerCase().includes(q) ||
-        String(d.depotNumber).includes(q),
-    );
-  }, [source, search]);
+    const { from, to } = hourRange;
+    if (!q && from === null && to === null) return source;
+    return source.filter((d) => {
+      if (
+        q &&
+        !(
+          d.companyName.toLowerCase().includes(q) ||
+          d.depositorName.toLowerCase().includes(q) ||
+          d.siteRef.toLowerCase().includes(q) ||
+          String(d.depotNumber).includes(q)
+        )
+      ) {
+        return false;
+      }
+      const hour = new Date(d.createdAt).getHours();
+      if (from !== null && hour < from) return false;
+      if (to !== null && hour > to) return false;
+      return true;
+    });
+  }, [source, search, hourRange]);
+
+  const hourFilterActive = hourRange.from !== null || hourRange.to !== null;
 
   async function handleSavePrice() {
     const parsed = Number(priceInput.replace(",", "."));
@@ -157,28 +187,53 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
 
       <DepotStats depots={source} countLabel={dibOnly ? "Dépôts facturables" : "Dépôts au total"} />
 
-      <Input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
-        className="max-w-md"
-      />
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
+          className="max-w-md flex-1"
+        />
+        <div className="flex items-end gap-2">
+          <HourSelect label="De" value={fromHour} onChange={setFromHour} />
+          <HourSelect label="À" value={toHour} onChange={setToHour} />
+          {hourFilterActive ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setFromHour("");
+                setToHour("");
+              }}
+            >
+              Effacer
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {hourFilterActive ? (
+        <p className="-mt-2 text-sm text-[var(--muted-foreground)]">
+          {filtered.length} dépôt{filtered.length > 1 ? "s" : ""} enregistré
+          {filtered.length > 1 ? "s" : ""} {describeHourRange(hourRange)}.
+        </p>
+      ) : null}
 
       {depots === undefined ? (
         <FullSpinner />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Recycle className="h-8 w-8" />}
-          title={search ? "Aucun résultat" : dibOnly ? "Aucun dépôt facturable" : "Aucun dépôt"}
+          title={search || hourFilterActive ? "Aucun résultat" : dibOnly ? "Aucun dépôt facturable" : "Aucun dépôt"}
           description={
-            search
-              ? "Aucun dépôt ne correspond à votre recherche."
+            search || hourFilterActive
+              ? "Aucun dépôt ne correspond à ces critères."
               : dibOnly
                 ? "Aucun dépôt ne contient de DIB ou de bois facturable pour l'instant."
                 : "Enregistrez un premier dépôt pour le voir apparaître ici."
           }
           action={
-            !search && !dibOnly ? (
+            !search && !hourFilterActive && !dibOnly ? (
               <Button onClick={openNewDepot}>
                 <PackagePlus className="h-4 w-4" /> Nouveau dépôt
               </Button>
@@ -190,4 +245,42 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
       )}
     </div>
   );
+}
+
+/** Bornes de la plage horaire : une heure pleine, de 00 à 23. */
+function HourSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm text-[var(--foreground)]"
+      >
+        <option value="">—</option>
+        {Array.from({ length: 24 }, (_, hour) => (
+          <option key={hour} value={hour}>
+            {String(hour).padStart(2, "0")}h
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** « entre 08h et 12h59 », « à partir de 17h », « avant 09h59 ». */
+function describeHourRange({ from, to }: { from: number | null; to: number | null }) {
+  const start = from !== null ? `${String(from).padStart(2, "0")}h` : null;
+  const end = to !== null ? `${String(to).padStart(2, "0")}h59` : null;
+  if (start && end) return `entre ${start} et ${end}`;
+  if (start) return `à partir de ${start}`;
+  return `avant ${end}`;
 }

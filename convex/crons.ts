@@ -31,6 +31,14 @@ crons.daily(
   internal.hrContractNotices.sendContractEndNotices,
 );
 
+// Équipe Recyclerie : miroir quotidien des salariés RH des structures
+// Recyclerie 60 / 76 (une fin de contrat rend le salarié inactif).
+crons.daily(
+  "synchronisation equipe recyclerie rh",
+  { hourUTC: 4, minuteUTC: 45 },
+  internal.polyvalents.syncFromHrDaily,
+);
+
 // Rappel J-1 aux clients qui ont réservé un créneau de dépôt en recyclerie.
 crons.daily(
   "rappel depot recyclerie",
@@ -52,6 +60,14 @@ crons.daily(
   "synchronisation catalogue stripe",
   { hourUTC: 3, minuteUTC: 20 },
   internal.stripeCatalog.reconcile,
+);
+
+// Boîte Gmail Vinted de Klyd : import des ventes, bordereaux et virements.
+// Toutes les heures — Vinted n'a pas d'API, l'email est la seule source.
+crons.hourly(
+  "import emails vinted klyd",
+  { minuteUTC: 40 },
+  internal.klydeGmail.syncAll,
 );
 
 export default crons;

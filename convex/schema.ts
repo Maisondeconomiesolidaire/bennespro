@@ -551,6 +551,8 @@ export default defineSchema(
     // --- Gestion interne (onglet Gestion du CRM) ---
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     assignedTo: v.optional(v.id("teamMembers")),
+    /** Équipe opérationnelle Recyclerie (remplace progressivement assignedTo). */
+    assignedWorkerId: v.optional(v.id("polyvalentWorkers")),
     estimatedHours: v.optional(v.number()),
     actualHours: v.optional(v.number()),
     quoteAmount: v.optional(v.number()),
@@ -578,6 +580,8 @@ export default defineSchema(
     createdAt: v.number(),
     updatedAt: v.number(),
     reference: v.optional(v.string()),
+    /** Envoi de l'invitation à noter la Recyclerie sur Google (une seule fois). */
+    reviewInviteSentAt: v.optional(v.number()),
     visitNeeded: v.optional(v.boolean()),
     legacyImport: v.optional(
       v.object({
@@ -597,6 +601,7 @@ export default defineSchema(
     .index("by_userId", ["userId"])
     .index("by_scheduledDate", ["scheduledDate"])
     .index("by_assignedVehicle", ["assignedVehicle"])
+    .index("by_assignedWorkerId", ["assignedWorkerId"])
     .index("by_reference", ["reference"]),
 
   /**
@@ -810,6 +815,9 @@ export default defineSchema(
     role: v.optional(v.string()),
     email: v.optional(v.string()),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    /** Sites de rattachement : un salarié peut intervenir sur les deux. */
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
     active: v.boolean(),
     createdAt: v.number(),
   }),
@@ -1157,6 +1165,8 @@ export default defineSchema(
     // Véhicule de la flotte affecté à la tournée.
     fleetVehicleId: v.optional(v.id("vehicles")),
     driverId: v.optional(v.id("teamMembers")),
+    /** Chauffeur issu de l'équipe opérationnelle (remplace `driverId`). */
+    driverWorkerId: v.optional(v.id("polyvalentWorkers")),
     stops: v.array(v.object({
       requestId: v.optional(v.id("requests")),
       address: v.string(),
@@ -1757,6 +1767,12 @@ export default defineSchema(
     // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
     vintedExtensionCount: v.optional(v.number()),
     vintedLastExtendedAt: v.optional(v.number()),
+    /**
+     * Date d'encaissement, posée au passage en « gagné ». Les rapports de
+     * vente se groupent par mois : sans cette date, un article vendu ne peut
+     * être rattaché qu'à `updatedAt`, que la moindre retouche déplace.
+     */
+    soldAt: v.optional(v.number()),
     // Décision prise lorsqu'un article sort de Stock B.
     stockBDisposition: v.optional(v.union(
       v.literal("vente_exceptionnelle"),
@@ -1784,10 +1800,16 @@ export default defineSchema(
     aiNotes: v.optional(v.string()),
     trackingNotes: v.optional(v.string()),
     featured: v.optional(v.boolean()),
+    /**
+     * Mise aux archives : l'article sort du stock, de la boutique et des
+     * rapports, mais garde son statut pour pouvoir être remis en ligne.
+     */
+    archivedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
+    .index("by_archivedAt", ["archivedAt"])
     .index("by_createdAt", ["createdAt"])
     .index("by_sku", ["sku"])
     .index("by_boutiquePublished", ["publishedOnBoutique"])
@@ -1829,6 +1851,137 @@ export default defineSchema(
     .index("by_clerkId", ["clerkId"])
     .index("by_clerkId_itemId", ["clerkId", "itemId"])
     .index("by_itemId", ["itemId"]),
+
+  /* ─── Klyd — boîte Gmail Vinted (OAuth Google + emails analysés) ─────────
+   *
+   * Vinted n'expose pas d'API publique : la seule source fiable sur ce qui est
+   * vendu, expédié ou payé reste la boîte mail du compte. On lit donc, en
+   * lecture seule (scope `gmail.readonly`), les emails Vinted du compte Gmail
+   * connecté, et on en extrait les informations exploitables dans Klyd.
+   */
+
+  /** Compte Gmail connecté via OAuth Google (un par boîte, réutilisable). */
+  klydeGmailAccounts: defineTable({
+    /** Adresse Gmail réellement connectée (renvoyée par Google, pas saisie). */
+    email: v.string(),
+    /** Clerk de la personne qui a autorisé l'accès (traçabilité). */
+    connectedByClerkId: v.string(),
+    connectedByName: v.optional(v.string()),
+    /**
+     * Jeton de rafraîchissement Google : c'est LUI qui donne l'accès durable.
+     * Google ne le renvoie qu'au premier consentement (`prompt=consent` force
+     * son renvoi) — on ne l'écrase donc jamais par une valeur vide.
+     */
+    refreshToken: v.string(),
+    accessToken: v.optional(v.string()),
+    accessTokenExpiresAt: v.optional(v.number()),
+    /** Requête Gmail appliquée à la synchronisation (surchargeable). */
+    query: v.optional(v.string()),
+    active: v.boolean(),
+    /** Date (ms) du message le plus récent déjà importé : borne du sync incrémental. */
+    lastMessageDate: v.optional(v.number()),
+    lastSyncAt: v.optional(v.number()),
+    lastSyncError: v.optional(v.string()),
+    importedCount: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_active", ["active"]),
+
+  /**
+   * État anti-CSRF de la redirection OAuth. Créé avant l'envoi chez Google,
+   * consommé (et supprimé) au retour : un `code` sans état connu est rejeté.
+   */
+  klydeGmailOAuthStates: defineTable({
+    state: v.string(),
+    clerkId: v.string(),
+    clerkName: v.optional(v.string()),
+    returnUrl: v.string(),
+    createdAt: v.number(),
+  }).index("by_state", ["state"]),
+
+  /** Email Vinted importé et analysé (une ligne par message Gmail). */
+  klydeVintedEmails: defineTable({
+    accountId: v.id("klydeGmailAccounts"),
+    /** Identifiant Gmail du message : clé d'idempotence de l'import. */
+    gmailId: v.string(),
+    threadId: v.optional(v.string()),
+    /** Date d'envoi (ms), telle que donnée par Gmail (`internalDate`). */
+    sentAt: v.number(),
+    subject: v.string(),
+    from: v.string(),
+    snippet: v.optional(v.string()),
+    /** Corps en texte brut (HTML aplati si l'email n'a pas de partie texte). */
+    bodyText: v.optional(v.string()),
+    /** Nature du message, déduite du sujet et du corps. */
+    kind: v.union(
+      v.literal("vente"),
+      v.literal("bordereau"),
+      v.literal("expedition"),
+      v.literal("paiement"),
+      v.literal("offre"),
+      v.literal("message"),
+      v.literal("autre"),
+    ),
+    /** Informations extraites (regex, complétées si besoin par l'IA). */
+    itemTitle: v.optional(v.string()),
+    amount: v.optional(v.number()),
+    buyer: v.optional(v.string()),
+    orderRef: v.optional(v.string()),
+    trackingNumber: v.optional(v.string()),
+    carrier: v.optional(v.string()),
+    /** Lien « imprimer le bordereau » trouvé dans l'email. */
+    labelUrl: v.optional(v.string()),
+    /** Lien vers la conversation Vinted avec l'acheteur. */
+    conversationUrl: v.optional(v.string()),
+    /** Lien vers l'annonce Vinted concernée. */
+    itemUrl: v.optional(v.string()),
+    /** Enseigne d'où vient l'email, déduite de la boîte scrutée. */
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
+    /** Coordonnées de l'acheteur, telles que Vinted les donne dans l'email. */
+    buyerName: v.optional(v.string()),
+    buyerAddress: v.optional(v.string()),
+    buyerEmail: v.optional(v.string()),
+    /** Facture générée pour cette vente (PDF dans le stockage Convex). */
+    invoiceStorageId: v.optional(v.id("_storage")),
+    invoiceNumber: v.optional(v.string()),
+    invoiceGeneratedAt: v.optional(v.number()),
+    /** Envoi de la facture au client (date et adresse réellement servie). */
+    invoiceSentAt: v.optional(v.number()),
+    invoiceSentTo: v.optional(v.string()),
+    /** Adresse qui a transféré la notification Vinted (le cas courant). */
+    forwardedBy: v.optional(v.string()),
+    /** Date de réception du transfert, quand elle diffère de la date d'origine. */
+    forwardedAt: v.optional(v.number()),
+    /** Pièces jointes rapatriées dans le stockage Convex (bordereaux PDF). */
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          filename: v.string(),
+          mimeType: v.string(),
+          size: v.optional(v.number()),
+        }),
+      ),
+    ),
+    /** `true` si l'extraction a été complétée par l'IA. */
+    aiParsed: v.optional(v.boolean()),
+    /** Article Klyd rattaché (rapprochement automatique ou manuel). */
+    matchedItemId: v.optional(v.id("klydeItems")),
+    matchConfidence: v.optional(v.number()),
+    /** Email traité par l'équipe (masqué de la file d'attente). */
+    handled: v.optional(v.boolean()),
+    handledAt: v.optional(v.number()),
+    handledByClerkId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_gmailId", ["gmailId"])
+    .index("by_sentAt", ["sentAt"])
+    .index("by_kind", ["kind"])
+    .index("by_handled", ["handled"])
+    .index("by_account", ["accountId"])
+    .index("by_matchedItem", ["matchedItemId"]),
 
   /* ─── App « Bennes & Pro » : dépôts de déchets par les entreprises ──────── */
 
@@ -2292,9 +2445,14 @@ export default defineSchema(
   /* ─── Agents polyvalents (Recyclerie) ─────────────────────────────────────
    * Gestion des ouvriers polyvalents : un catalogue de tâches, une liste
    * d'ouvriers (nom/prénom), et des activités qui affectent un ouvrier à une
-   * tâche sur un créneau daté. Distinct de `teamMembers` (agents permanents). */
+   * tâche sur un créneau daté. `polyvalentWorkers` est désormais l'unique
+   * équipe Recyclerie (les anciens « agents permanents » y ont été fusionnés). */
   polyvalentTasks: defineTable({
     name: v.string(),
+    /** Site de traitement : une tâche appartient à une recyclerie. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    /** Main d'œuvre requise par mois, en heures (base du plan de charge). */
+    requiredMonthlyHours: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_name", ["name"]),
@@ -2302,16 +2460,65 @@ export default defineSchema(
   polyvalentWorkers: defineTable({
     firstName: v.string(),
     lastName: v.string(),
+    email: v.optional(v.string()),
+    /** Recycleries de rattachement : un salarié peut intervenir sur les deux. */
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    /** Type de contrat : agent permanent ou agent polyvalent. */
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
+    /** Inactif = conservé pour l'historique mais plus attribuable. */
+    active: v.optional(v.boolean()),
+    /** Salarié RH correspondant : la fiche RH fait foi pour l'identité. */
+    hrEmployeeId: v.optional(v.id("hrEmployees")),
+    /** Fin du dernier contrat (`YYYY-MM-DD`) ; absente pour un CDI. */
+    contractEndAt: v.optional(v.string()),
+    /** Réactivation manuelle : la synchro RH ne redésactive plus ce salarié. */
+    reactivatedAt: v.optional(v.number()),
+    /**
+     * Statut forcé à la main dans l'app. Il l'emporte sur la fin de contrat,
+     * mais pas sur une sortie d'effectif RH.
+     */
+    activeOverride: v.optional(v.boolean()),
+    /** Durée mensuelle de travail du dernier contrat, en heures (source RH). */
+    monthlyHours: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
-  }),
+  }).index("by_hrEmployee", ["hrEmployeeId"]),
+
+  polyvalentWorkerSchedules: defineTable({
+    workerId: v.id("polyvalentWorkers"),
+    availability: v.array(v.object({
+      weekday: v.number(),
+      start: v.string(),
+      end: v.string(),
+    })),
+  }).index("by_worker", ["workerId"]),
+
+  /** Règles hebdomadaires durables : elles restent actives jusqu'à annulation. */
+  polyvalentTaskRecurrences: defineTable({
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
+    slots: v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() })),
+    /** @deprecated La charge d'un créneau est la durée du créneau. */
+    plannedHours: v.optional(v.number()),
+    /** @deprecated La recyclerie vient désormais de la tâche. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_task", ["taskId"])
+    .index("by_worker", ["workerId"]),
 
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
-    workerId: v.id("polyvalentWorkers"),
+    /** Une tâche peut être planifiée avant qu'un salarié lui soit affecté. */
+    workerId: v.optional(v.id("polyvalentWorkers")),
     /** Début et fin du créneau, en millisecondes epoch (date + heure). */
     startAt: v.number(),
     endAt: v.number(),
+    /** @deprecated La charge d'un créneau est la durée du créneau. */
+    plannedHours: v.optional(v.number()),
+    /** @deprecated La recyclerie vient désormais de la tâche. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     createdBy: v.string(),
     createdAt: v.number(),
   })

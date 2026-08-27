@@ -118,6 +118,7 @@ async function handleCatalogEvent(
     product?: string;
     unit_amount?: number;
     currency?: string;
+    metadata?: { draftId?: string };
   },
 ) {
   if (type === "product.deleted") {
@@ -159,6 +160,13 @@ async function handleCatalogEvent(
   }
 
   if (type === "checkout.session.completed" && object.id) {
+    // Une session portant un `draftId` est une commande de la boutique ou de
+    // la vitrine : elle a son propre circuit, qui marque les articles vendus
+    // ET enregistre la commande. Les marquer vendus ici les rendrait
+    // indisponibles avant que la commande existe, et la finalisation
+    // échouerait sur un article « déjà vendu ».
+    if (object.metadata?.draftId) return;
+
     // Les lignes de la session ne sont pas dans le webhook : il faut les
     // redemander à Stripe, donc passer par une action.
     await ctx.scheduler.runAfter(
@@ -249,6 +257,43 @@ http.route({
       );
       return new Response(message, { status: 500 });
     }
+  }),
+});
+
+/* ─── OAuth Google — connexion de la boîte Gmail Vinted de Klyd ────────────
+ *
+ * Google renvoie l'utilisateur ici après le consentement. On échange le `code`
+ * contre un refresh token côté serveur (le secret client ne quitte jamais
+ * Convex), puis on renvoie l'utilisateur dans Klyd.
+ *
+ * URI de redirection à déclarer dans Google Cloud Console :
+ *   https://hip-marten-394.eu-west-1.convex.site/klyde/gmail/oauth/callback
+ */
+http.route({
+  path: "/klyde/gmail/oauth/callback",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const error = url.searchParams.get("error");
+    const fallback = (process.env.KLYDE_APP_URL ?? "https://klyd.groupemes.fr").replace(/\/$/, "");
+
+    if (error) {
+      return Response.redirect(
+        `${fallback}/?gmail=error&message=${encodeURIComponent(error)}`,
+        302,
+      );
+    }
+    if (!code || !state) {
+      return Response.redirect(
+        `${fallback}/?gmail=error&message=${encodeURIComponent("Réponse Google incomplète.")}`,
+        302,
+      );
+    }
+
+    const redirect = await ctx.runAction(internal.klydeGmail.completeOAuth, { code, state });
+    return Response.redirect(redirect, 302);
   }),
 });
 

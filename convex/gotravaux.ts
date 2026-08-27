@@ -244,6 +244,13 @@ export const createVehicleTask = mutation({
     beforeNotes: v.optional(v.string()),
     afterPhotos: v.optional(v.array(v.id("_storage"))),
     afterNotes: v.optional(v.string()),
+    /**
+     * Statut à la création. Réservé à la reprise d'historique (import Excel),
+     * qui enregistre des interventions déjà faites : les garde-fous de clôture
+     * (temps passé, prix des pièces) ne s'appliquent pas, ces informations
+     * n'existant pas dans les fichiers repris.
+     */
+    status: v.optional(taskStatus),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
@@ -254,7 +261,7 @@ export const createVehicleTask = mutation({
       title: args.title.trim(),
       description: args.description?.trim() || undefined,
       priority: args.priority,
-      status: "todo",
+      status: args.status ?? "todo",
       dueDate: args.dueDate,
       endDate: args.endDate,
       odometerKm: args.odometerKm,
@@ -342,6 +349,23 @@ export const addVehicleDocument = mutation({
       uploadedBy: displayName(identity),
       createdAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Renomme un document. Le nom repris à l'import est celui du fichier
+ * (« IMG_4821.pdf », « scan0007.pdf ») : sans renommage, une carte grise ne se
+ * distingue d'un devis qu'en l'ouvrant.
+ */
+export const renameVehicleDocument = mutation({
+  args: { documentId: v.id("vehicleDocuments"), name: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
+    const name = args.name.trim();
+    if (!name) throw new Error("Le nom du document ne peut pas être vide.");
+    const document = await ctx.db.get(args.documentId);
+    if (!document) throw new Error("Document introuvable.");
+    await ctx.db.patch(args.documentId, { name: name.slice(0, 200) });
   },
 });
 
@@ -462,6 +486,17 @@ export const updateVehicleTask = mutation({
         });
       }
     }
+  },
+});
+
+/** Supprime définitivement une maintenance, après confirmation côté interface. */
+export const removeVehicleTask = mutation({
+  args: { taskId: v.id("vehicleMaintenanceTasks") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "delete");
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Maintenance introuvable.");
+    await ctx.db.delete(args.taskId);
   },
 });
 
