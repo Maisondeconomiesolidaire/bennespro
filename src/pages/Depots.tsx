@@ -27,10 +27,10 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
   const settings = useQuery(api.bennespro.getDibSettings);
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const [search, setSearch] = useState("");
-  // Plage horaire de saisie, bornes incluses : « 8 » à « 12 » retient tout ce
-  // qui a été déposé de 08h00 à 12h59.
-  const [fromHour, setFromHour] = useState("");
-  const [toHour, setToHour] = useState("");
+  // Plage horaire de saisie, à la minute et bornes incluses : 07:00 → 08:00
+  // retient 08:00 pile, mais pas 08:01.
+  const [fromTime, setFromTime] = useState("");
+  const [toTime, setToTime] = useState("");
 
   const [editingPrice, setEditingPrice] = useState(false);
   const [priceInput, setPriceInput] = useState("");
@@ -45,17 +45,22 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
   }, [depots, dibOnly]);
 
   const hourRange = useMemo(() => {
+    /** « HH:MM » → minutes depuis minuit, pour comparer sans manipuler de dates. */
     const parse = (value: string) => {
-      const hour = Number.parseInt(value, 10);
-      return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+      const match = value.match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) return null;
+      const hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      if (hours > 23 || minutes > 59) return null;
+      return hours * 60 + minutes;
     };
-    const from = parse(fromHour);
-    const to = parse(toHour);
-    // Bornes inversées (« de 17h à 8h ») : on les remet dans l'ordre plutôt que
-    // de renvoyer une liste vide sans expliquer pourquoi.
+    const from = parse(fromTime);
+    const to = parse(toTime);
+    // Bornes inversées (« de 17:00 à 08:00 ») : on les remet dans l'ordre plutôt
+    // que de renvoyer une liste vide sans expliquer pourquoi.
     if (from !== null && to !== null && from > to) return { from: to, to: from };
     return { from, to };
-  }, [fromHour, toHour]);
+  }, [fromTime, toTime]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -73,9 +78,10 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
       ) {
         return false;
       }
-      const hour = new Date(d.createdAt).getHours();
-      if (from !== null && hour < from) return false;
-      if (to !== null && hour > to) return false;
+      const at = new Date(d.createdAt);
+      const minuteOfDay = at.getHours() * 60 + at.getMinutes();
+      if (from !== null && minuteOfDay < from) return false;
+      if (to !== null && minuteOfDay > to) return false;
       return true;
     });
   }, [source, search, hourRange]);
@@ -195,15 +201,15 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
           className="max-w-md flex-1"
         />
         <div className="flex items-end gap-2">
-          <HourSelect label="De" value={fromHour} onChange={setFromHour} />
-          <HourSelect label="À" value={toHour} onChange={setToHour} />
+          <TimeInput label="De" value={fromTime} onChange={setFromTime} />
+          <TimeInput label="À" value={toTime} onChange={setToTime} />
           {hourFilterActive ? (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
-                setFromHour("");
-                setToHour("");
+                setFromTime("");
+                setToTime("");
               }}
             >
               Effacer
@@ -247,8 +253,8 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
   );
 }
 
-/** Bornes de la plage horaire : une heure pleine, de 00 à 23. */
-function HourSelect({
+/** Borne de la plage horaire, à la minute près. */
+function TimeInput({
   label,
   value,
   onChange,
@@ -260,27 +266,21 @@ function HourSelect({
   return (
     <label className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
       {label}
-      <select
+      <input
+        type="time"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="h-10 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-sm text-[var(--foreground)]"
-      >
-        <option value="">—</option>
-        {Array.from({ length: 24 }, (_, hour) => (
-          <option key={hour} value={hour}>
-            {String(hour).padStart(2, "0")}h
-          </option>
-        ))}
-      </select>
+      />
     </label>
   );
 }
 
-/** « entre 08h et 12h59 », « à partir de 17h », « avant 09h59 ». */
+/** « entre 07:00 et 08:00 », « à partir de 17:00 », « jusqu'à 09:30 ». */
 function describeHourRange({ from, to }: { from: number | null; to: number | null }) {
-  const start = from !== null ? `${String(from).padStart(2, "0")}h` : null;
-  const end = to !== null ? `${String(to).padStart(2, "0")}h59` : null;
-  if (start && end) return `entre ${start} et ${end}`;
-  if (start) return `à partir de ${start}`;
-  return `avant ${end}`;
+  const label = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  if (from !== null && to !== null) return `entre ${label(from)} et ${label(to)}`;
+  if (from !== null) return `à partir de ${label(from)}`;
+  return `jusqu'à ${label(to!)}`;
 }

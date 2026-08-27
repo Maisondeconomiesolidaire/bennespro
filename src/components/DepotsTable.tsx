@@ -120,6 +120,15 @@ function StatCard({
  * montants HT/TTC, statut de facturation et actions (facture, actualisation,
  * relance, facturation) identiques. La page DIB ne fait que filtrer les lignes.
  */
+/** Date et heure de saisie : « 27/08/2026 à 15:42 ». */
+function formatDepotDateTime(createdAt: number) {
+  const date = new Date(createdAt);
+  return `${date.toLocaleDateString("fr-FR")} à ${date.toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+}
+
 export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
   const settings = useQuery(api.bennespro.getDibSettings);
   const billDepot = useMutation(api.bennespro.billDepot);
@@ -306,7 +315,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     </td>
                     <td className="px-4 py-3 font-medium text-[var(--foreground)]">{d.companyName}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-[var(--muted-foreground)]">
-                      {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                      {formatDepotDateTime(d.createdAt)}
                       {/* Compte partagé : qui a saisi le dépôt. */}
                       {d.createdByProfile && (
                         <span className="block text-xs opacity-80">
@@ -378,7 +387,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-[var(--foreground)]">{d.companyName}</p>
                     <p className="text-xs text-[var(--muted-foreground)]">
-                      N° {String(d.depotNumber).padStart(4, "0")} · {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                      N° {String(d.depotNumber).padStart(4, "0")} · {formatDepotDateTime(d.createdAt)}
                     </p>
                   </div>
                   {d.billing ? (
