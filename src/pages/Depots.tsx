@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck, BadgeEuro, PackagePlus, Pencil, Recycle } from "lucide-react";
+import { BadgeCheck, BadgeEuro, Clock, PackagePlus, Pencil, Recycle } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { DIB_MATERIAL, WOOD_MATERIAL } from "../lib/materials";
 import { useAppActions } from "../lib/appActions";
@@ -11,6 +11,7 @@ import { Input } from "../components/ui/Field";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FullSpinner, Spinner } from "../components/ui/Spinner";
 import { DepotsTable, DepotStats } from "../components/DepotsTable";
+import { DepotsAttendance } from "../components/DepotsAttendance";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 
@@ -20,7 +21,14 @@ const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" 
  * pour qu'aucun élément ne se décale au changement d'onglet — seul le filtre
  * des lignes et les chiffres changent.
  */
-export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
+export function Depots({
+  dibOnly = false,
+  attendance = false,
+}: {
+  dibOnly?: boolean;
+  /** Onglet Fréquentation : le même jeu de dépôts, lu par tranche horaire. */
+  attendance?: boolean;
+}) {
   const navigate = useNavigate();
   const { openNewDepot } = useAppActions();
   const depots = useQuery(api.bennespro.listDepots);
@@ -62,29 +70,31 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
     return { from, to };
   }, [fromTime, toTime]);
 
-  const filtered = useMemo(() => {
+  /** Recherche texte seule : c'est elle que le graphique de fréquentation lit,
+   *  la plage horaire l'amputerait de son objet. */
+  const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
+    if (!q) return source;
+    return source.filter(
+      (d) =>
+        d.companyName.toLowerCase().includes(q) ||
+        d.depositorName.toLowerCase().includes(q) ||
+        d.siteRef.toLowerCase().includes(q) ||
+        String(d.depotNumber).includes(q),
+    );
+  }, [source, search]);
+
+  const filtered = useMemo(() => {
     const { from, to } = hourRange;
-    if (!q && from === null && to === null) return source;
-    return source.filter((d) => {
-      if (
-        q &&
-        !(
-          d.companyName.toLowerCase().includes(q) ||
-          d.depositorName.toLowerCase().includes(q) ||
-          d.siteRef.toLowerCase().includes(q) ||
-          String(d.depotNumber).includes(q)
-        )
-      ) {
-        return false;
-      }
+    if (from === null && to === null) return searched;
+    return searched.filter((d) => {
       const at = new Date(d.createdAt);
       const minuteOfDay = at.getHours() * 60 + at.getMinutes();
       if (from !== null && minuteOfDay < from) return false;
       if (to !== null && minuteOfDay > to) return false;
       return true;
     });
-  }, [source, search, hourRange]);
+  }, [searched, hourRange]);
 
   const hourFilterActive = hourRange.from !== null || hourRange.to !== null;
 
@@ -123,9 +133,14 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
         items={[
           { key: "all", label: "Tous les dépôts" },
           { key: "dib", label: "Facturation", icon: Recycle },
+          { key: "frequentation", label: "Fréquentation", icon: Clock },
         ]}
-        value={dibOnly ? "dib" : "all"}
-        onChange={(key) => navigate(key === "dib" ? "/crm/dib" : "/crm")}
+        value={attendance ? "frequentation" : dibOnly ? "dib" : "all"}
+        onChange={(key) =>
+          navigate(
+            key === "dib" ? "/crm/dib" : key === "frequentation" ? "/crm/frequentation" : "/crm",
+          )
+        }
       />
 
       {/* ── Prix des matières payantes (identique sur les deux onglets) ─────── */}
@@ -200,7 +215,7 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
           placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
           className="max-w-md flex-1"
         />
-        <div className="flex items-end gap-2">
+        <div className={attendance ? "hidden" : "flex items-end gap-2"}>
           <TimeInput label="De" value={fromTime} onChange={setFromTime} />
           <TimeInput label="À" value={toTime} onChange={setToTime} />
           {hourFilterActive ? (
@@ -218,7 +233,7 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
         </div>
       </div>
 
-      {hourFilterActive ? (
+      {hourFilterActive && !attendance ? (
         <p className="-mt-2 text-sm text-[var(--muted-foreground)]">
           {filtered.length} dépôt{filtered.length > 1 ? "s" : ""} enregistré
           {filtered.length > 1 ? "s" : ""} {describeHourRange(hourRange)}.
@@ -227,6 +242,8 @@ export function Depots({ dibOnly = false }: { dibOnly?: boolean }) {
 
       {depots === undefined ? (
         <FullSpinner />
+      ) : attendance ? (
+        <DepotsAttendance depots={searched} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Recycle className="h-8 w-8" />}
