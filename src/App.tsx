@@ -22,10 +22,14 @@ import {
   AccountDocumentation,
 } from "./pages/public/Account";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
+import { ProfileSync } from "./components/ProfileSync";
 
 export default function App() {
   return (
     <>
+      {/* Hors de toute garde d'authentification : l'origine de l'inscription
+          se constitue pendant la visite déconnectée. */}
+      <ProfileSync app="bennespro" />
       <UpdateAvailableBanner appName="Bennes Pro" />
       <Routes>
         {/* Portail client public (thème clair) */}

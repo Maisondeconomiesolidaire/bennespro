@@ -3,7 +3,7 @@ import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk
 import { AuthPanel } from "../AuthPanel";
 import { AppSwitcher } from "../AppSwitcher";
 import { HelpButton } from "../HelpButton";
-import { useConvexAuth, useMutation } from "convex/react";
+import { useConvexAuth } from "convex/react";
 import {
   Building2,
   LogOut,
@@ -26,7 +26,6 @@ import { canAccess, hasBennesProAccess, PAGE_DEPOTS, PAGE_ENTREPRISES } from "..
 import { FullSpinner } from "../ui/Spinner";
 import { NewDepotWizard } from "../NewDepotWizard";
 import { CompanyModal } from "../CompanyModal";
-import { api } from "../../../convex/_generated/api";
 import { useTheme } from "../../lib/useTheme";
 import { ProfileProvider, useProfileContext } from "../../lib/profile";
 
@@ -94,23 +93,11 @@ function ConvexAuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"
   // le backend, et un visiteur anonyme du portail public n'a rien à y faire.
   return (
     <>
-      <ProfileSync />
       <ProfileProvider>
         <AuthenticatedShell theme={theme} setTheme={setTheme} />
       </ProfileProvider>
     </>
   );
-}
-
-/** Crée/rafraîchit le profil Convex à la connexion et rattache les données. */
-function ProfileSync() {
-  const syncProfile = useMutation(api.users.syncProfile);
-  useEffect(() => {
-    void syncProfile({
-      source: { app: "bennespro", path: window.location.pathname + window.location.search },
-    });
-  }, [syncProfile]);
-  return null;
 }
 
 function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
