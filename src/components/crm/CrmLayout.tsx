@@ -49,17 +49,7 @@ export function CrmLayout() {
   return (
     <>
       <SignedOut>
-        <div className="flex min-h-screen items-center justify-center px-4 py-10">
-          <div className="w-full max-w-md">
-            <div className="mb-6 flex items-center justify-between">
-              <BrandLogo />
-              <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
-            </div>
-            <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-6">
-              <AuthPanel />
-            </div>
-          </div>
-        </div>
+        <AuthPanel />
       </SignedOut>
 
       <SignedIn>
@@ -362,19 +352,6 @@ function SignOutButton() {
       title="Se déconnecter"
     >
       <LogOut className="h-4 w-4" />
-    </button>
-  );
-}
-
-function ThemeToggle({ theme, onToggle }: { theme: "light" | "dark"; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] transition hover:bg-[var(--accent)]"
-      aria-label="Basculer le thème"
-    >
-      {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
   );
 }
