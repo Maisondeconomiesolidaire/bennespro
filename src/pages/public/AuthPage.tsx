@@ -3,8 +3,12 @@ import { Navigate, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut } from "@clerk/clerk-react";
 import { AuthPanel } from "../../components/AuthPanel";
 
-/** Page de connexion / inscription du portail client. */
-export function AuthPage() {
+/**
+ * Page dédiée de connexion / inscription : montée HORS de `PublicLayout`, donc
+ * sans en-tête ni pied de page. Le portail est un écran plein — l'afficher dans
+ * le shell le comprimait dans une colonne et doublait son titre.
+ */
+export function AuthPage({ initialMode = "signin" }: { initialMode?: "signin" | "signup" }) {
   const location = useLocation();
   const redirectUrl = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -17,7 +21,7 @@ export function AuthPage() {
         <Navigate to={redirectUrl} replace />
       </SignedIn>
       <SignedOut>
-        <AuthPanel redirectUrl={redirectUrl} />
+        <AuthPanel initialMode={initialMode} redirectUrl={redirectUrl} />
       </SignedOut>
     </>
   );

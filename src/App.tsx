@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { CrmLayout } from "./components/crm/CrmLayout";
 import { RequirePermission } from "./components/RequirePermission";
 import { PAGE_DEPOTS, PAGE_ENTREPRISES } from "./lib/permissions";
@@ -32,10 +32,15 @@ export default function App() {
       <ProfileSync app="bennespro" />
       <UpdateAvailableBanner appName="Bennes Pro" />
       <Routes>
+        {/* Page dédiée de connexion : hors du shell public, comme sur Mes
+            Outils et BâtiRe — le portail occupe tout l'écran. */}
+        <Route path="/connexion" element={<AuthPage />} />
+        <Route path="/inscription" element={<AuthPage initialMode="signup" />} />
+        <Route path="/auth" element={<LegacyAuthRedirect />} />
+
         {/* Portail client public (thème clair) */}
         <Route element={<PublicLayout />}>
           <Route index element={<Landing />} />
-          <Route path="/auth" element={<AuthPage />} />
           <Route
             path="/compte"
             element={
@@ -102,4 +107,11 @@ export default function App() {
       </Routes>
     </>
   );
+}
+
+/** Ancien chemin du portail, conservé pour les liens déjà diffusés. */
+function LegacyAuthRedirect() {
+  const location = useLocation();
+  const target = location.hash === "#sign-up" ? "/inscription" : "/connexion";
+  return <Navigate to={`${target}${location.search}`} replace />;
 }

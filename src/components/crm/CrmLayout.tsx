@@ -1,6 +1,5 @@
-import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk-react";
-import { AuthPanel } from "../AuthPanel";
 import { AppSwitcher } from "../AppSwitcher";
 import { HelpButton } from "../HelpButton";
 import { useConvexAuth } from "convex/react";
@@ -49,7 +48,7 @@ export function CrmLayout() {
   return (
     <>
       <SignedOut>
-        <AuthPanel />
+        <CrmSignInRedirect />
       </SignedOut>
 
       <SignedIn>
@@ -354,4 +353,11 @@ function SignOutButton() {
       <LogOut className="h-4 w-4" />
     </button>
   );
+}
+
+/** Le portail est servi par la page dédiée `/connexion`, qui ramène ici. */
+function CrmSignInRedirect() {
+  const location = useLocation();
+  const redirectUrl = `${location.pathname}${location.search}`;
+  return <Navigate to={`/connexion?redirect_url=${encodeURIComponent(redirectUrl)}`} replace />;
 }

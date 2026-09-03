@@ -35,14 +35,14 @@ export function Landing() {
           </SignedIn>
           <SignedOut>
             <Link
-              to="/auth#sign-up"
+              to="/inscription"
               className="inline-flex items-center gap-2 rounded-full bg-brand-500 px-6 py-3 text-sm font-bold text-white transition hover:bg-brand-600"
             >
               Créer mon compte
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
-              to="/auth"
+              to="/connexion"
               className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-6 py-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-50"
             >
               J'ai déjà un compte
