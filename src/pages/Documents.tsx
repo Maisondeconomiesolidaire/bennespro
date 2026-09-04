@@ -1,22 +1,21 @@
-import { useState } from "react";
-import { useQuery } from "convex/react";
-import { Building2, FileText } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { Download, FileText, Trash2, Upload } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { CompanyDocumentsTab } from "../components/crm/CompanyTabs";
+import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Field, Input } from "../components/ui/Field";
+import { FileButton } from "../components/ui/FileButton";
 import { FullSpinner } from "../components/ui/Spinner";
+import { useToast } from "../components/ui/Toast";
+import { useUpload } from "../lib/useUpload";
 
-/** Documents envoyés par le CRM aux entreprises clientes. */
 export function Documents() {
-  const companies = useQuery(api.bennespro.listCompanies);
-  const [companyId, setCompanyId] = useState<Id<"bpCompanies"> | null>(null);
-  if (companies === undefined) return <FullSpinner label="Chargement des entreprises…" />;
-  if (companies.length === 0) return <EmptyState icon={<Building2 className="h-8 w-8" />} title="Aucune entreprise" description="Créez une entreprise avant de lui envoyer des documents." />;
-  const selected = companies.find((company) => company._id === companyId) ?? null;
-  return <div className="space-y-5">
-    <div><h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-[var(--foreground)]"><FileText className="h-6 w-6 text-brand-600" /> Documents</h1><p className="mt-1 text-sm text-[var(--muted-foreground)]">Ajoutez des documents pour une entreprise. Ils seront disponibles dans son espace client et devront être consultés.</p></div>
-    <label className="block max-w-lg text-sm font-semibold text-[var(--foreground)]">Entreprise<select value={companyId ?? ""} onChange={(event) => setCompanyId((event.target.value || null) as Id<"bpCompanies"> | null)} className="mt-1.5 h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 font-normal outline-none focus:border-brand-500"><option value="">— Choisir une entreprise —</option>{companies.map((company) => <option key={company._id} value={company._id}>{company.name}{company.siret ? ` · ${company.siret}` : ""}</option>)}</select></label>
-    {selected ? <CompanyDocumentsTab companyId={selected._id} /> : <EmptyState icon={<FileText className="h-8 w-8" />} title="Sélectionnez une entreprise" description="Choisissez le destinataire des documents à gérer." />}
-  </div>;
+  const documents = useQuery(api.bennespro.listPublicDocumentsForCrm);
+  const add = useMutation(api.bennespro.addPublicDocument);
+  const remove = useMutation(api.bennespro.removePublicDocument);
+  const upload = useUpload(); const toast = useToast();
+  const [file, setFile] = useState<File | null>(null); const [note, setNote] = useState(""); const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); if (!file) return toast.error("Sélectionnez un fichier."); setBusy(true); try { const storageId = await upload(file); await add({ storageId, name: file.name, note: note.trim() || undefined, mimeType: file.type || undefined }); setFile(null); setNote(""); toast.success("Document publié pour tous les clients."); } catch (error) { toast.error(error instanceof Error ? error.message : "Envoi impossible."); } finally { setBusy(false); } }
+  return <div className="space-y-5"><div><h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-[var(--foreground)]"><FileText className="h-6 w-6 text-brand-600" /> Documents</h1><p className="mt-1 text-sm text-[var(--muted-foreground)]">Ces documents sont publiés dans « Documentation » pour toutes les entreprises.</p></div><form onSubmit={submit} className="space-y-3 rounded-xl border border-[var(--border)] p-4"><Field label="Fichier"><FileButton onFile={setFile} accept="application/pdf,image/*" selectedName={file?.name} /></Field><Field label="Description (optionnel)"><Input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Ex. Consignes de tri 2026" /></Field><Button type="submit" disabled={busy}><Upload className="h-4 w-4" />{busy ? "Publication…" : "Publier pour tous"}</Button></form>{documents === undefined ? <FullSpinner /> : documents.length === 0 ? <EmptyState icon={<FileText className="h-8 w-8" />} title="Aucun document publié" description="Ajoutez un premier document à la documentation client." /> : <div className="space-y-2">{documents.map((doc) => <div key={doc._id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3"><FileText className="h-5 w-5 text-brand-600" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{doc.name}</p>{doc.note ? <p className="text-xs text-[var(--muted-foreground)]">{doc.note}</p> : null}</div><a href={doc.url ?? undefined} target="_blank" rel="noreferrer"><Download className="h-4 w-4" /></a><button type="button" onClick={() => void remove({ documentId: doc._id })} className="text-red-600"><Trash2 className="h-4 w-4" /></button></div>)}</div>}</div>;
 }

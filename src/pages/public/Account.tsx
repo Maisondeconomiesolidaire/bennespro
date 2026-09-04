@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   AlertTriangle,
   BookOpen,
@@ -32,7 +32,6 @@ import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, ty
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
 import { unitLabel, MATERIALS, ECODDS_SUBMATERIALS } from "../../lib/materials";
 import { cn } from "../../lib/cn";
-import { CompanyDirectory } from "../../components/CompanyDirectory";
 
 const CARD = "rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6";
 
@@ -265,6 +264,7 @@ export function AccountInfo() {
   const vehicles = useQuery(api.bennesproClientVehicles.listMyVehicles, company ? {} : "skip");
   const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
   const save = useMutation(api.bennespro.saveMyCompany);
+  const searchDirectory = useAction(api.bennespro.searchEnterpriseDirectory);
   const addVehicle = useMutation(api.bennesproClientVehicles.addMyVehicle);
   const addDocument = useMutation(api.bennespro.addMyDocument);
   const upload = useUpload();
@@ -275,6 +275,8 @@ export function AccountInfo() {
   const [kbisFile, setKbisFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [addingVehicle, setAddingVehicle] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [detailsVisible, setDetailsVisible] = useState(false);
 
   useEffect(() => {
     if (!company) return;
@@ -303,6 +305,18 @@ export function AccountInfo() {
 
   function setVehicle<K extends keyof VehicleForm>(key: K, value: VehicleForm[K]) {
     setVehicleForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function lookupSiret() {
+    const siret = form.siret.replace(/\s/g, "");
+    if (!/^\d{14}$/.test(siret)) return toast.error("Renseignez un SIRET à 14 chiffres.");
+    setLookupBusy(true);
+    try {
+      const [entry] = await searchDirectory({ query: siret });
+      if (!entry) return toast.error("Aucune entreprise active trouvée pour ce SIRET.");
+      setForm((current) => ({ ...current, siret: entry.siret || siret, name: entry.name, nafCode: entry.nafCode, address: entry.address }));
+      setDetailsVisible(true);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Recherche impossible."); } finally { setLookupBusy(false); }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -373,26 +387,18 @@ export function AccountInfo() {
 
   return (
     <form onSubmit={submit} className={cn(CARD, "space-y-5")}>
-      {!company && (
-        <>
-          <p className="rounded-2xl bg-brand-500/10 px-4 py-3 text-sm font-medium text-brand-700">
-            Bienvenue ! Recherchez votre entreprise pour préremplir le formulaire, ou renseignez-le manuellement.
-          </p>
-          <CompanyDirectory onSelect={(entry) => setForm((current) => ({ ...current, name: entry.name, siret: entry.siret, nafCode: entry.nafCode, address: entry.address }))} selectLabel="Préremplir mon entreprise" />
-          <div className="border-t border-zinc-200 pt-5"><p className="text-sm font-bold text-zinc-950">Ou saisissez les informations manuellement</p></div>
-        </>
-      )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Nom de l'entreprise" required>
+      {!company && <p className="rounded-2xl bg-brand-500/10 px-4 py-3 text-sm font-medium text-brand-700">Commencez par renseigner votre SIRET : les informations connues seront préremplies, puis modifiables.</p>}
+      <Field label="SIRET" required>
+        <div className="flex gap-2"><Input value={form.siret} onChange={(e) => set("siret", e.target.value)} placeholder="123 456 789 00012" /><Button type="button" onClick={() => void lookupSiret()} disabled={lookupBusy}>{lookupBusy ? "Recherche…" : "Rechercher"}</Button></div>
+      </Field>
+      {(company || detailsVisible) ? <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Nom de l'entreprise (Optionnel)" required>
           <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ex. Dupont BTP" />
         </Field>
-        <Field label="SIRET">
-          <Input value={form.siret} onChange={(e) => set("siret", e.target.value)} placeholder="123 456 789 00012" />
-        </Field>
-        <Field label="Code NAF / APE">
+        <Field label="Code NAF / APE (Optionnel)">
           <Input value={form.nafCode} onChange={(e) => set("nafCode", e.target.value.toUpperCase())} placeholder="Ex. 43.99C" />
         </Field>
-        <Field label="Profil">
+        <Field label="Profil (Optionnel)">
           <Select<CompanyType>
             value={form.companyType}
             onChange={(v) => set("companyType", v)}
@@ -401,7 +407,7 @@ export function AccountInfo() {
           />
         </Field>
         {form.companyType === "autre" ? (
-          <Field label="Précisez">
+          <Field label="Précisez (Optionnel)">
             <Input
               value={form.companyTypeOther}
               onChange={(e) => set("companyTypeOther", e.target.value)}
@@ -412,7 +418,7 @@ export function AccountInfo() {
           <div className="hidden sm:block" />
         )}
         <div className="sm:col-span-2">
-          <Field label="Adresse">
+          <Field label="Adresse (Optionnel)">
             <AddressAutocomplete
               value={form.address}
               onValueChange={(v) => set("address", v)}
@@ -423,21 +429,21 @@ export function AccountInfo() {
             />
           </Field>
         </div>
-        <Field label="Téléphone">
+        <Field label="Téléphone (Optionnel)">
           <Input value={form.contactPhone} onChange={(e) => set("contactPhone", e.target.value)} placeholder="06 12 34 56 78" />
         </Field>
-        <Field label="Email">
+        <Field label="Email (Optionnel)">
           <Input type="email" value={form.contactEmail} onChange={(e) => set("contactEmail", e.target.value)} placeholder="contact@entreprise.fr" />
         </Field>
-        <Field label="Nom et prénom du responsable">
+        <Field label="Nom et prénom du responsable (Optionnel)">
           <Input value={form.contactName} onChange={(e) => set("contactName", e.target.value)} placeholder="Marie Dupont" />
         </Field>
-        <Field label="Email de facturation">
+        <Field label="Email de facturation (Optionnel)">
           <Input type="email" value={form.billingEmail} onChange={(e) => set("billingEmail", e.target.value)} placeholder="facturation@entreprise.fr" />
         </Field>
-      </div>
+      </div> : null}
 
-      <Field label="KBIS ou avis de situation" hint="PDF ou image. Vous pourrez en ajouter d'autres depuis l'onglet Documents.">
+      {(company || detailsVisible) ? <><Field label="KBIS ou avis de situation (Optionnel)" hint="PDF ou image. Vous pourrez en ajouter d'autres depuis l'onglet Documents.">
         <FileButton onFile={setKbisFile} accept="application/pdf,image/*" selectedName={kbisFile?.name} />
         {existingKbis.length > 0 && (
           <p className="mt-2 text-xs text-zinc-500">
@@ -505,13 +511,13 @@ export function AccountInfo() {
             </div>
           </form>
         </div>
-      ) : null}
+      ) : null}</> : null}
 
-      <div className="flex justify-end">
+      {(company || detailsVisible) ? <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
           {saving ? "Enregistrement…" : "Enregistrer"}
         </Button>
-      </div>
+      </div> : null}
     </form>
   );
 }
@@ -868,25 +874,6 @@ const REFUSED_FLOWS: string[] = [
   "Bombonnes, fûts",
 ];
 
-/** Documents à télécharger (PDF servis depuis /public). */
-const DOCUMENTS: { label: string; description: string; file: string }[] = [
-  {
-    label: "DDS — Déchets Diffus Spécifiques",
-    description: "Liste et consignes de tri des déchets diffus spécifiques.",
-    file: "/DDS.pdf",
-  },
-  {
-    label: "Déchets acceptés",
-    description: "Détail des flux de reprise acceptés sur le site.",
-    file: "/dechets-acceptes.pdf",
-  },
-  {
-    label: "Savoir décrypter un vélux",
-    description: "Guide d'identification et de reprise des menuiseries de type vélux.",
-    file: "/savoir-decrypter-un-velux.pdf",
-  },
-];
-
 /** Règles d'accès (conditions et modalités de dépôt). */
 const ACCESS_RULES: string[] = [
   "Je trie mes déchets de préférence avant de venir.",
@@ -897,6 +884,8 @@ const ACCESS_RULES: string[] = [
 ];
 
 export function AccountDocumentation() {
+  const publicDocuments = useQuery(api.bennespro.listPublicDocuments, {});
+  const markPublicDocumentConsulted = useMutation(api.bennespro.markPublicDocumentConsulted);
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
@@ -987,11 +976,12 @@ export function AccountDocumentation() {
           </span>
           <h2 className="text-lg font-black tracking-tight text-zinc-950">Documents à télécharger</h2>
         </div>
+        {publicDocuments?.some((doc) => !doc.consultedAt) ? <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">Veuillez consulter puis cocher « Consulté » pour chaque document.</p> : null}
         <ul className="space-y-2.5">
-          {DOCUMENTS.map((doc) => (
-            <li key={doc.file}>
+          {(publicDocuments ?? []).map((doc) => (
+            <li key={doc._id} className="flex flex-wrap items-center gap-2.5">
               <a
-                href={doc.file}
+                href={doc.url ?? undefined}
                 target="_blank"
                 rel="noreferrer"
                 className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:border-brand-300 hover:bg-brand-50"
@@ -1000,11 +990,12 @@ export function AccountDocumentation() {
                   <FileText className="h-5 w-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-bold text-zinc-900">{doc.label}</span>
-                  <span className="block text-xs text-zinc-500">{doc.description}</span>
+                  <span className="block text-sm font-bold text-zinc-900">{doc.name}</span>
+                  {doc.note ? <span className="block text-xs text-zinc-500">{doc.note}</span> : null}
                 </span>
                 <Download className="h-5 w-5 shrink-0 text-zinc-400 transition group-hover:text-brand-600" />
               </a>
+              <Checkbox checked={!!doc.consultedAt} onChange={(checked) => { if (checked) void markPublicDocumentConsulted({ documentId: doc._id }); }} label="Consulté" />
             </li>
           ))}
         </ul>

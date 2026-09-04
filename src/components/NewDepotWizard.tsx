@@ -40,9 +40,9 @@ import { QrScannerModal } from "./QrScannerModal";
 import { cn } from "../lib/cn";
 import { useProfileId } from "../lib/profile";
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
-const STEP_LABELS = ["Entreprise", "Déchets", "Pièces jointes", "Signature", "Bon"];
+const STEP_LABELS = ["Entreprise", "Images et déchets", "Signature", "Bon"];
 const ECODDS_GROUP_LABEL = "ECODDS";
 
 /** Convertit une data URL en File pour l'upload Convex. */
@@ -98,19 +98,19 @@ export function NewDepotWizard({
   const [items, setItems] = useState<DepotItem[]>([]);
   const [showEcoddsSubmaterials, setShowEcoddsSubmaterials] = useState(false);
 
-  // Étape 3
+  // Étape 2 — les images précèdent désormais le choix des flux.
   const [ticketPhoto, setTicketPhoto] = useState<Id<"_storage"> | null>(null);
   const [truckExteriorPhoto, setTruckExteriorPhoto] = useState<Id<"_storage"> | null>(null);
   const [truckInteriorPhoto, setTruckInteriorPhoto] = useState<Id<"_storage"> | null>(null);
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [comment, setComment] = useState("");
 
-  // Étape 4
+  // Étape 3
   const [signature, setSignature] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Étape 5 (résultat)
+  // Étape 4 (résultat)
   const [saved, setSaved] = useState<BonDepotData | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
 
@@ -210,7 +210,7 @@ export function NewDepotWizard({
         vehicle,
         signatureUrl: signature,
       });
-      setStep(5);
+      setStep(4);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec de l'enregistrement du dépôt.");
     } finally {
@@ -363,6 +363,16 @@ export function NewDepotWizard({
       {/* ── Étape 2 : Déchets ─────────────────────────────────────────────── */}
       {step === 2 ? (
         <div className="space-y-5">
+          <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <p className="text-sm font-semibold text-[var(--foreground)]">Images du dépôt</p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Photo du ticket"><SinglePhotoUpload value={ticketPhoto} onChange={setTicketPhoto} /></Field>
+              <Field label="Extérieur du camion"><SinglePhotoUpload value={truckExteriorPhoto} onChange={setTruckExteriorPhoto} /></Field>
+              <Field label="Intérieur du camion"><SinglePhotoUpload value={truckInteriorPhoto} onChange={setTruckInteriorPhoto} /></Field>
+            </div>
+            <Field label="Autres photos"><PhotoUpload value={attachments} onChange={setAttachments} /></Field>
+            <Field label="Commentaire (facultatif)"><Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Observations éventuelles…" /></Field>
+          </div>
           <div>
             <p className="mb-2 text-sm font-medium text-[var(--foreground)]">Sélectionnez les matériaux déposés</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -467,31 +477,8 @@ export function NewDepotWizard({
         </div>
       ) : null}
 
-      {/* ── Étape 3 : Pièces jointes ──────────────────────────────────────── */}
+      {/* ── Étape 3 : Récap + signature ───────────────────────────────────── */}
       {step === 3 ? (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Photo du ticket">
-              <SinglePhotoUpload value={ticketPhoto} onChange={setTicketPhoto} />
-            </Field>
-            <Field label="Extérieur du camion">
-              <SinglePhotoUpload value={truckExteriorPhoto} onChange={setTruckExteriorPhoto} />
-            </Field>
-            <Field label="Intérieur du camion">
-              <SinglePhotoUpload value={truckInteriorPhoto} onChange={setTruckInteriorPhoto} />
-            </Field>
-          </div>
-          <Field label="Autres pièces jointes">
-            <PhotoUpload value={attachments} onChange={setAttachments} />
-          </Field>
-          <Field label="Commentaire (facultatif)">
-            <Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Observations éventuelles…" />
-          </Field>
-        </div>
-      ) : null}
-
-      {/* ── Étape 4 : Récap + signature ───────────────────────────────────── */}
-      {step === 4 ? (
         <div className="space-y-5">
           <RecapBlock
             companyName={company?.name ?? "—"}
@@ -507,8 +494,8 @@ export function NewDepotWizard({
         </div>
       ) : null}
 
-      {/* ── Étape 5 : Confirmation ────────────────────────────────────────── */}
-      {step === 5 ? (
+      {/* ── Étape 4 : Confirmation ────────────────────────────────────────── */}
+      {step === 4 ? (
         <div className="flex flex-col items-center py-6 text-center">
           <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-brand-100 text-brand-600">
             <Check className="h-7 w-7" />
@@ -533,12 +520,12 @@ export function NewDepotWizard({
       ) : null}
 
       {/* ── Barre de navigation ───────────────────────────────────────────── */}
-      {step < 5 ? (
+      {step < 4 ? (
         <div className="mt-6 flex items-center justify-between border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={() => (step === 1 ? resetAndClose() : setStep((s) => (s - 1) as Step))} disabled={submitting}>
             <ArrowLeft className="h-4 w-4" /> {step === 1 ? "Annuler" : "Précédent"}
           </Button>
-          {step < 4 ? (
+          {step < 3 ? (
             <Button
               onClick={() => setStep((s) => (s + 1) as Step)}
               disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid)}
