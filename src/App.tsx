@@ -4,6 +4,7 @@ import { RequirePermission } from "./components/RequirePermission";
 import { PAGE_DEPOTS, PAGE_ENTREPRISES } from "./lib/permissions";
 import { Depots } from "./pages/Depots";
 import { Entreprises } from "./pages/Entreprises";
+import { Documents } from "./pages/Documents";
 import { Messages } from "./pages/Messages";
 import { Dib } from "./pages/Dib";
 import { Frequentation } from "./pages/Frequentation";
@@ -74,6 +75,10 @@ export default function App() {
                 <Entreprises />
               </RequirePermission>
             }
+          />
+          <Route
+            path="documents"
+            element={<RequirePermission pageKey={PAGE_ENTREPRISES}><Documents /></RequirePermission>}
           />
           <Route
             path="messagerie"

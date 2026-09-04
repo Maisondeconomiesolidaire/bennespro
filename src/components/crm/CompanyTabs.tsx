@@ -22,6 +22,7 @@ type CompanyDocument = {
   note: string | null;
   uploadedByRole: "client" | "staff";
   sharedWithClientAt: number | null;
+  clientConsultedAt: number | null;
   url: string | null;
 };
 
@@ -85,7 +86,7 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
       await addDoc({ companyId, storageId, name: file.name, note: note.trim() || undefined, mimeType: file.type || undefined });
       setFile(null);
       setNote("");
-      toast.success("Document ajouté (non partagé). Utilisez « Partager au client » pour le rendre visible.");
+      toast.success("Document ajouté et mis à disposition du client.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Envoi impossible.");
     } finally {
@@ -174,7 +175,7 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contexte du document…" />
         </Field>
         <p className="text-xs text-[var(--muted-foreground)]">
-          Le document n'est pas visible par le client tant qu'il n'est pas partagé.
+          Le document sera immédiatement visible dans l'espace client et devra être consulté.
         </p>
         <div className="flex justify-end">
           <Button type="submit" size="sm" disabled={uploading}>
@@ -188,7 +189,7 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
         <FullSpinner label="Chargement…" />
       ) : documents.length === 0 ? (
         <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucun document.</p>
-      ) : (
+                  ) : (
         <div className="space-y-2">
           {documents.map((doc) => (
             <div key={doc._id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3">
@@ -205,8 +206,11 @@ export function CompanyDocumentsTab({ companyId }: { companyId: Id<"bpCompanies"
                       <span className="inline-flex items-center rounded-full bg-[var(--muted)] px-2 py-0.5 text-[11px] font-semibold text-[var(--muted-foreground)]">
                         Non partagé
                       </span>
-                    )
-                  ) : null}
+                  )
+                ) : null}
+                {doc.uploadedByRole === "staff" && doc.sharedWithClientAt ? (
+                  doc.clientConsultedAt ? <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700"><BadgeCheck className="h-3 w-3" /> Consulté par le client</span> : <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">À consulter</span>
+                ) : null}
                 </p>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {doc.uploadedByRole === "client" ? "Transmis par le client" : "Ajouté par vous"}

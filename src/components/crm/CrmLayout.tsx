@@ -5,6 +5,7 @@ import { HelpButton } from "../HelpButton";
 import { useConvexAuth } from "convex/react";
 import {
   Building2,
+  FileText,
   LogOut,
   Menu,
   MessageSquare,
@@ -38,6 +39,7 @@ const NAV_ITEMS: Array<{
 }> = [
   { to: "/crm", label: "Dépôts", icon: Recycle, pageKey: PAGE_DEPOTS },
   { to: "/crm/entreprises", label: "Entreprises", icon: Building2, pageKey: PAGE_ENTREPRISES },
+  { to: "/crm/documents", label: "Documents", icon: FileText, pageKey: PAGE_ENTREPRISES },
   { to: "/crm/messagerie", label: "Messagerie", icon: MessageSquare, pageKey: PAGE_ENTREPRISES },
   { to: "/crm/dib", label: "Facturation", icon: Truck, pageKey: PAGE_DEPOTS },
 ];

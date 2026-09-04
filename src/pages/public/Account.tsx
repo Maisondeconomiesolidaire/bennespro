@@ -25,6 +25,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { FullSpinner } from "../../components/ui/Spinner";
 import { BillingBadge } from "../../components/ui/BillingBadge";
 import { FileButton } from "../../components/ui/FileButton";
+import { Checkbox } from "../../components/ui/Checkbox";
 import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
 import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
@@ -626,11 +627,13 @@ export function AccountDocuments() {
   const company = useQuery(api.bennespro.getMyCompany, {});
   const documents = useQuery(api.bennespro.listMyDocuments, company ? {} : "skip");
   const addDocument = useMutation(api.bennespro.addMyDocument);
+  const markConsulted = useMutation(api.bennespro.markMyDocumentConsulted);
   const upload = useUpload();
   const toast = useToast();
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const pendingConsultation = documents?.filter((doc) => doc.uploadedByRole === "staff" && !doc.clientConsultedAt) ?? [];
 
   if (company === undefined) return <FullSpinner label="Chargement…" />;
   if (!company) return <NeedsCompany />;
@@ -672,6 +675,13 @@ export function AccountDocuments() {
         />
       </div>
 
+      {pendingConsultation.length > 0 ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-bold">Documents à consulter</p>
+          <p className="mt-1">Veuillez ouvrir puis cocher « Consulté » pour chacun des documents mis à votre disposition.</p>
+        </div>
+      ) : null}
+
       {documents === undefined ? (
         <FullSpinner label="Chargement des documents…" />
       ) : documents.length === 0 ? (
@@ -683,13 +693,8 @@ export function AccountDocuments() {
       ) : (
         <div className="space-y-2">
           {documents.map((doc) => (
-            <a
-              key={doc._id}
-              href={doc.url ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              className={cn(CARD, "flex items-center gap-3 !p-4 transition hover:bg-zinc-50")}
-            >
+            <div key={doc._id} className={cn(CARD, "flex flex-wrap items-center gap-3 !p-4")}>
+              <a href={doc.url ?? undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 transition hover:text-brand-700">
               <FileText className="h-5 w-5 shrink-0 text-zinc-400" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-zinc-950">{doc.name}</p>
@@ -699,7 +704,9 @@ export function AccountDocuments() {
                 </p>
               </div>
               <Download className="h-4 w-4 shrink-0 text-zinc-400" />
-            </a>
+              </a>
+              {doc.uploadedByRole === "staff" ? <Checkbox checked={!!doc.clientConsultedAt} onChange={(checked) => { if (checked) void markConsulted({ documentId: doc._id }); }} label="Consulté" /> : null}
+            </div>
           ))}
         </div>
       )}
