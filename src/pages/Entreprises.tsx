@@ -20,6 +20,8 @@ import { useAccess } from "../components/RequirePermission";
 import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
 import { companyTypeLabel } from "../lib/companyProfile";
 import { useToast } from "../components/ui/Toast";
+import { CompanyDirectory } from "../components/CompanyDirectory";
+import { CompanyModal, type CompanyForm } from "../components/CompanyModal";
 
 type ComplianceStatus = "validated" | "pending" | "missing";
 
@@ -48,6 +50,8 @@ export function Entreprises() {
   const companies = useQuery(api.bennespro.listCompanies);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Id<"bpCompanies"> | null>(null);
+  const [tab, setTab] = useState<"companies" | "directory">("companies");
+  const [directoryPrefill, setDirectoryPrefill] = useState<Partial<CompanyForm> | null>(null);
   const [qrCompany, setQrCompany] = useState<(Pick<Doc<"bpCompanies">, "_id" | "name"> & { siret?: string }) | null>(null);
 
   const filtered = (companies ?? []).filter((c) =>
@@ -59,10 +63,17 @@ export function Entreprises() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Entreprises</h1>
         <Button onClick={() => openCompany()}>
-          <Plus className="h-4 w-4" /> Nouvelle entreprise
+          <Plus className="h-4 w-4" /> Ajouter manuellement
         </Button>
       </div>
 
+      <UnderlineTabs
+        value={tab}
+        onChange={setTab}
+        items={[{ key: "companies", label: "Entreprises", icon: Building2 }, { key: "directory", label: "Annuaire", icon: Building2 }]}
+      />
+
+      {tab === "companies" ? <>
       <Input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
@@ -118,12 +129,23 @@ export function Entreprises() {
           ))}
         </div>
       )}
+      </> : (
+        <CompanyDirectory
+          selectLabel="Ajouter cette entreprise"
+          onSelect={(entry) => setDirectoryPrefill({ name: entry.name, siret: entry.siret, nafCode: entry.nafCode, address: entry.address })}
+        />
+      )}
 
       <CompanyDetailModal
         companyId={selected}
         onClose={() => setSelected(null)}
         onEdit={(id) => { setSelected(null); openCompany(id); }}
         onShowQr={(company) => { setSelected(null); setQrCompany(company); }}
+      />
+      <CompanyModal
+        open={directoryPrefill !== null}
+        onClose={() => setDirectoryPrefill(null)}
+        initialForm={directoryPrefill ?? undefined}
       />
       <CompanyQrModal company={qrCompany} onClose={() => setQrCompany(null)} />
     </div>

@@ -12,9 +12,10 @@ import { COMPANY_TYPE_OPTIONS, type CompanyType } from "../lib/companyProfile";
 import { CompanyDocumentsTab, CompanyMessagesTab } from "./crm/CompanyTabs";
 import { CompanyQrModal } from "./CompanyQrModal";
 
-type Form = {
+export type CompanyForm = {
   name: string;
   siret: string;
+  nafCode: string;
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -24,9 +25,10 @@ type Form = {
   billingEmail: string;
 };
 
-const EMPTY: Form = {
+const EMPTY: CompanyForm = {
   name: "",
   siret: "",
+  nafCode: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -46,11 +48,13 @@ export function CompanyModal({
   open,
   onClose,
   companyId,
+  initialForm,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   companyId?: Id<"bpCompanies">;
+  initialForm?: Partial<CompanyForm>;
   onCreated?: (id: Id<"bpCompanies">) => void;
 }) {
   const existing = useQuery(
@@ -61,7 +65,7 @@ export function CompanyModal({
   const updateCompany = useMutation(api.bennespro.updateCompany);
 
   const [tab, setTab] = useState<Tab>("infos");
-  const [form, setForm] = useState<Form>(EMPTY);
+  const [form, setForm] = useState<CompanyForm>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Entreprise fraîchement créée : on affiche son QR code généré automatiquement. */
@@ -74,6 +78,7 @@ export function CompanyModal({
       setForm({
         name: existing.name ?? "",
         siret: existing.siret ?? "",
+        nafCode: existing.nafCode ?? "",
         companyType: existing.companyType ?? "",
         companyTypeOther: existing.companyTypeOther ?? "",
         address: existing.address ?? "",
@@ -83,11 +88,11 @@ export function CompanyModal({
         billingEmail: existing.billingEmail ?? "",
       });
     } else if (!companyId) {
-      setForm(EMPTY);
+      setForm({ ...EMPTY, ...initialForm });
     }
-  }, [open, companyId, existing]);
+  }, [open, companyId, existing, initialForm]);
 
-  const set = (key: keyof Form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
+  const set = (key: keyof CompanyForm) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
 
   async function handleSave() {
     if (!form.name.trim()) {
@@ -100,6 +105,7 @@ export function CompanyModal({
       const payload = {
         name: form.name.trim(),
         siret: form.siret.trim() || undefined,
+        nafCode: form.nafCode.trim() || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -163,6 +169,9 @@ export function CompanyModal({
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="SIRET">
               <Input value={form.siret} onChange={(e) => set("siret")(e.target.value)} placeholder="123 456 789 00012" />
+            </Field>
+            <Field label="Code NAF / APE">
+              <Input value={form.nafCode} onChange={(e) => set("nafCode")(e.target.value.toUpperCase())} placeholder="Ex. 43.99C" />
             </Field>
             <Field label="Profil">
               <Select<CompanyType>

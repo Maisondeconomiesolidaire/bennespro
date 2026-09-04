@@ -31,6 +31,7 @@ import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, ty
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
 import { unitLabel, MATERIALS, ECODDS_SUBMATERIALS } from "../../lib/materials";
 import { cn } from "../../lib/cn";
+import { CompanyDirectory } from "../../components/CompanyDirectory";
 
 const CARD = "rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6";
 
@@ -225,6 +226,7 @@ function NeedsCompany() {
 type InfoForm = {
   name: string;
   siret: string;
+  nafCode: string;
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -242,6 +244,7 @@ type VehicleForm = {
 const EMPTY_INFO: InfoForm = {
   name: "",
   siret: "",
+  nafCode: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -277,6 +280,7 @@ export function AccountInfo() {
     setForm({
       name: company.name ?? "",
       siret: company.siret ?? "",
+      nafCode: company.nafCode ?? "",
       companyType: company.companyType ?? "",
       companyTypeOther: company.companyTypeOther ?? "",
       address: company.address ?? "",
@@ -311,6 +315,7 @@ export function AccountInfo() {
       await save({
         name: form.name.trim(),
         siret: form.siret.trim() || undefined,
+        nafCode: form.nafCode.trim() || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -368,9 +373,13 @@ export function AccountInfo() {
   return (
     <form onSubmit={submit} className={cn(CARD, "space-y-5")}>
       {!company && (
-        <p className="rounded-2xl bg-brand-500/10 px-4 py-3 text-sm font-medium text-brand-700">
-          Bienvenue ! Renseignez les informations de votre entreprise pour finaliser votre inscription.
-        </p>
+        <>
+          <p className="rounded-2xl bg-brand-500/10 px-4 py-3 text-sm font-medium text-brand-700">
+            Bienvenue ! Recherchez votre entreprise pour préremplir le formulaire, ou renseignez-le manuellement.
+          </p>
+          <CompanyDirectory onSelect={(entry) => setForm((current) => ({ ...current, name: entry.name, siret: entry.siret, nafCode: entry.nafCode, address: entry.address }))} selectLabel="Préremplir mon entreprise" />
+          <div className="border-t border-zinc-200 pt-5"><p className="text-sm font-bold text-zinc-950">Ou saisissez les informations manuellement</p></div>
+        </>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Nom de l'entreprise" required>
@@ -378,6 +387,9 @@ export function AccountInfo() {
         </Field>
         <Field label="SIRET">
           <Input value={form.siret} onChange={(e) => set("siret", e.target.value)} placeholder="123 456 789 00012" />
+        </Field>
+        <Field label="Code NAF / APE">
+          <Input value={form.nafCode} onChange={(e) => set("nafCode", e.target.value.toUpperCase())} placeholder="Ex. 43.99C" />
         </Field>
         <Field label="Profil">
           <Select<CompanyType>
