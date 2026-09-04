@@ -71,10 +71,11 @@ export function DepotDetailModal({
 
   const photos = depot
     ? [
-        { label: "Ticket", url: depot.ticketUrl },
         { label: "Extérieur camion", url: depot.truckExteriorUrl },
         { label: "Intérieur camion", url: depot.truckInteriorUrl },
         ...depot.attachmentUrls.map((url, i) => ({ label: `Pièce jointe ${i + 1}`, url })),
+        // Le ticket ferme la série, comme dans l'ordre de saisie du dépôt.
+        { label: "Ticket", url: depot.ticketUrl },
       ].filter((p) => p.url)
     : [];
 

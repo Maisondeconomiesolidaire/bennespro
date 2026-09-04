@@ -2140,6 +2140,37 @@ export default defineSchema(
     createdAt: v.number(),
   }),
 
+  /** Évènements internes affichés dans le calendrier CRM Recycapp. */
+  recycappCalendarEvents: defineTable({
+    title: v.string(),
+    animationType: v.optional(v.string()),
+    structure: v.optional(v.string()),
+    activity: v.optional(v.string()),
+    location: v.optional(v.string()),
+    relatedEvent: v.optional(v.string()),
+    targetAudience: v.optional(v.string()),
+    organizer: v.optional(v.string()),
+    completed: v.optional(v.boolean()),
+    /** Salariés mobilisés sur l'évènement (équipe Recyclerie). */
+    workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
+    startAt: v.number(),
+    endAt: v.number(),
+    attachments: v.array(v.id("_storage")),
+    urls: v.array(v.string()),
+    createdAt: v.number(),
+  }).index("by_startAt", ["startAt"]),
+
+  /**
+   * Options ajoutées à la main dans les listes déroulantes des évènements
+   * Recycapp (structure, activité, type d'animation, public ciblé). Une option
+   * saisie une fois reste proposée à toute l'équipe.
+   */
+  recycappCalendarOptions: defineTable({
+    field: v.string(),
+    label: v.string(),
+    createdAt: v.number(),
+  }).index("by_field", ["field"]),
+
   /** Accusé de consultation d'un document général, partagé par entreprise. */
   bpPublicDocumentConsultations: defineTable({
     documentId: v.id("bpPublicDocuments"),

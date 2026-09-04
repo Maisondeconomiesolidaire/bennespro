@@ -42,7 +42,7 @@ import { useProfileId } from "../lib/profile";
 
 type Step = 1 | 2 | 3 | 4;
 
-const STEP_LABELS = ["Entreprise", "Images et déchets", "Signature", "Bon"];
+const STEP_LABELS = ["Entreprise", "Camion et déchets", "Ticket et signature", "Bon"];
 const ECODDS_GROUP_LABEL = "ECODDS";
 
 /** Convertit une data URL en File pour l'upload Convex. */
@@ -365,8 +365,7 @@ export function NewDepotWizard({
         <div className="space-y-5">
           <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-sm font-semibold text-[var(--foreground)]">Images du dépôt</p>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Photo du ticket"><SinglePhotoUpload value={ticketPhoto} onChange={setTicketPhoto} /></Field>
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Extérieur du camion"><SinglePhotoUpload value={truckExteriorPhoto} onChange={setTruckExteriorPhoto} /></Field>
               <Field label="Intérieur du camion"><SinglePhotoUpload value={truckInteriorPhoto} onChange={setTruckInteriorPhoto} /></Field>
             </div>
@@ -477,7 +476,7 @@ export function NewDepotWizard({
         </div>
       ) : null}
 
-      {/* ── Étape 3 : Récap + signature ───────────────────────────────────── */}
+      {/* ── Étape 3 : Récap, ticket et signature ──────────────────────────── */}
       {step === 3 ? (
         <div className="space-y-5">
           <RecapBlock
@@ -487,6 +486,11 @@ export function NewDepotWizard({
             siteRef={siteRef}
             items={items}
           />
+          {/* Le ticket de pesée n'existe qu'une fois le camion vidé : il se
+              photographie en fin de dépôt, pas à l'arrivée. */}
+          <Field label="Photo du ticket">
+            <SinglePhotoUpload value={ticketPhoto} onChange={setTicketPhoto} />
+          </Field>
           <Field label="Signature du déposant" required>
             <SignaturePad onChange={setSignature} />
           </Field>
