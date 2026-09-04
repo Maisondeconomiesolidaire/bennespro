@@ -874,13 +874,6 @@ const REFUSED_FLOWS: string[] = [
   "Bombonnes, fûts",
 ];
 
-/** Guides déjà publiés dans la documentation client. */
-const DOCUMENTS: { label: string; description: string; file: string }[] = [
-  { label: "DDS — Déchets Diffus Spécifiques", description: "Liste et consignes de tri des déchets diffus spécifiques.", file: "/DDS.pdf" },
-  { label: "Déchets acceptés", description: "Détail des flux de reprise acceptés sur le site.", file: "/dechets-acceptes.pdf" },
-  { label: "Savoir décrypter un vélux", description: "Guide d'identification et de reprise des menuiseries de type vélux.", file: "/savoir-decrypter-un-velux.pdf" },
-];
-
 /** Règles d'accès (conditions et modalités de dépôt). */
 const ACCESS_RULES: string[] = [
   "Je trie mes déchets de préférence avant de venir.",
@@ -980,17 +973,8 @@ export function AccountDocumentation() {
         </div>
         {publicDocuments?.some((doc) => !doc.consultedAt) ? <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">Veuillez consulter puis cocher « Consulté » pour chaque document.</p> : null}
         <ul className="space-y-2.5">
-          {DOCUMENTS.map((doc) => (
-            <li key={doc.file}>
-              <a href={doc.file} target="_blank" rel="noreferrer" className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:border-brand-300 hover:bg-brand-50">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm"><FileText className="h-5 w-5" /></span>
-                <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-zinc-900">{doc.label}</span><span className="block text-xs text-zinc-500">{doc.description}</span></span>
-                <Download className="h-5 w-5 shrink-0 text-zinc-400 transition group-hover:text-brand-600" />
-              </a>
-            </li>
-          ))}
           {(publicDocuments ?? []).map((doc) => (
-            <li key={doc._id} className="flex flex-wrap items-center gap-2.5">
+            <li key={doc.key} className="flex flex-wrap items-center gap-2.5">
               <a
                 href={doc.url ?? undefined}
                 target="_blank"
@@ -1006,7 +990,7 @@ export function AccountDocumentation() {
                 </span>
                 <Download className="h-5 w-5 shrink-0 text-zinc-400 transition group-hover:text-brand-600" />
               </a>
-              <Checkbox checked={!!doc.consultedAt} onChange={(checked) => { if (checked) void markPublicDocumentConsulted({ documentId: doc._id }); }} label="Consulté" />
+              {doc.uploaded ? <Checkbox checked={!!doc.consultedAt} onChange={(checked) => { if (checked) void markPublicDocumentConsulted({ documentId: doc.key }); }} label="Consulté" /> : null}
             </li>
           ))}
         </ul>
