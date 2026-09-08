@@ -61,7 +61,7 @@ export function Entreprises() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Entreprises</h1>
+        <div><h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">Entreprises</h1><p className="text-sm text-[var(--muted-foreground)]">{companies === undefined ? "…" : `${companies.length} entreprise${companies.length > 1 ? "s" : ""}`}{search.trim() ? ` · ${filtered.length} affichée${filtered.length > 1 ? "s" : ""}` : ""}</p></div>
         <Button onClick={() => openCompany()}>
           <Plus className="h-4 w-4" /> Ajouter manuellement
         </Button>
@@ -120,6 +120,7 @@ export function Entreprises() {
               </button>
               <p className="mt-3 font-semibold text-[var(--foreground)]">{c.name}</p>
               {c.siret ? <p className="text-xs text-[var(--muted-foreground)]">SIRET {c.siret}</p> : null}
+              {c.activityLabel ? <p className="mt-1 text-xs text-[var(--muted-foreground)]">{c.activityLabel}</p> : null}
               {c.contactPhone ? <p className="text-xs text-[var(--muted-foreground)]">{c.contactPhone}</p> : null}
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 <ComplianceChip label="Convention" status={c.compliance.convention} />
@@ -132,7 +133,7 @@ export function Entreprises() {
       </> : (
         <CompanyDirectory
           selectLabel="Ajouter cette entreprise"
-          onSelect={(entry) => setDirectoryPrefill({ name: entry.name, siret: entry.siret, nafCode: entry.nafCode, address: entry.address })}
+          onSelect={(entry) => setDirectoryPrefill({ name: entry.name, siret: entry.siret, nafCode: entry.nafCode, activityLabel: entry.activityLabel, address: entry.address })}
         />
       )}
 
@@ -277,6 +278,8 @@ function CompanyDetailModal({
               </div>
               <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <Detail label="SIRET" value={company.siret} />
+                <Detail label="Activité principale" value={company.activityLabel} />
+                <Detail label="Code NAF / APE" value={company.nafCode} />
                 <Detail label="Profil" value={companyTypeLabel(company.companyType, company.companyTypeOther)} />
                 <Detail label="Téléphone" value={company.contactPhone} />
                 <Detail label="Contact" value={company.contactName} />

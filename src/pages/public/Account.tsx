@@ -227,6 +227,7 @@ type InfoForm = {
   name: string;
   siret: string;
   nafCode: string;
+  activityLabel: string;
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -245,6 +246,7 @@ const EMPTY_INFO: InfoForm = {
   name: "",
   siret: "",
   nafCode: "",
+  activityLabel: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -284,6 +286,7 @@ export function AccountInfo() {
       name: company.name ?? "",
       siret: company.siret ?? "",
       nafCode: company.nafCode ?? "",
+      activityLabel: company.activityLabel ?? "",
       companyType: company.companyType ?? "",
       companyTypeOther: company.companyTypeOther ?? "",
       address: company.address ?? "",
@@ -314,7 +317,7 @@ export function AccountInfo() {
     try {
       const [entry] = await searchDirectory({ query: siret });
       if (!entry) return toast.error("Aucune entreprise active trouvée pour ce SIRET.");
-      setForm((current) => ({ ...current, siret: entry.siret || siret, name: entry.name, nafCode: entry.nafCode, address: entry.address }));
+      setForm((current) => ({ ...current, siret: entry.siret || siret, name: entry.name, nafCode: entry.nafCode, activityLabel: entry.activityLabel, address: entry.address }));
       setDetailsVisible(true);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Recherche impossible."); } finally { setLookupBusy(false); }
   }
@@ -331,6 +334,7 @@ export function AccountInfo() {
         name: form.name.trim(),
         siret: form.siret.trim() || undefined,
         nafCode: form.nafCode.trim() || undefined,
+        activityLabel: form.activityLabel.trim() || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -397,6 +401,9 @@ export function AccountInfo() {
         </Field>
         <Field label="Code NAF / APE (Optionnel)">
           <Input value={form.nafCode} onChange={(e) => set("nafCode", e.target.value.toUpperCase())} placeholder="Ex. 43.99C" />
+        </Field>
+        <Field label="Activité principale (Optionnel)">
+          <Input value={form.activityLabel} onChange={(e) => set("activityLabel", e.target.value)} placeholder="Ex. Travaux de menuiserie bois et PVC" />
         </Field>
         <Field label="Profil (Optionnel)">
           <Select<CompanyType>

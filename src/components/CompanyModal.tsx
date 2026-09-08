@@ -16,6 +16,7 @@ export type CompanyForm = {
   name: string;
   siret: string;
   nafCode: string;
+  activityLabel: string;
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -29,6 +30,7 @@ const EMPTY: CompanyForm = {
   name: "",
   siret: "",
   nafCode: "",
+  activityLabel: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -79,6 +81,7 @@ export function CompanyModal({
         name: existing.name ?? "",
         siret: existing.siret ?? "",
         nafCode: existing.nafCode ?? "",
+        activityLabel: existing.activityLabel ?? "",
         companyType: existing.companyType ?? "",
         companyTypeOther: existing.companyTypeOther ?? "",
         address: existing.address ?? "",
@@ -106,6 +109,7 @@ export function CompanyModal({
         name: form.name.trim(),
         siret: form.siret.trim() || undefined,
         nafCode: form.nafCode.trim() || undefined,
+        activityLabel: form.activityLabel.trim() || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -172,6 +176,9 @@ export function CompanyModal({
             </Field>
             <Field label="Code NAF / APE">
               <Input value={form.nafCode} onChange={(e) => set("nafCode")(e.target.value.toUpperCase())} placeholder="Ex. 43.99C" />
+            </Field>
+            <Field label="Activité principale">
+              <Input value={form.activityLabel} onChange={(e) => set("activityLabel")(e.target.value)} placeholder="Ex. Travaux de menuiserie bois et PVC" />
             </Field>
             <Field label="Profil">
               <Select<CompanyType>

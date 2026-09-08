@@ -11,6 +11,7 @@ export type CompanyDirectoryEntry = {
   siret: string;
   address: string;
   nafCode: string;
+  activityLabel: string;
 };
 
 export function CompanyDirectory({ onSelect, selectLabel = "Utiliser cette entreprise" }: {
@@ -51,7 +52,7 @@ export function CompanyDirectory({ onSelect, selectLabel = "Utiliser cette entre
       {results?.length === 0 ? <p className="rounded-xl bg-[var(--accent)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Aucune entreprise active trouvée.</p> : null}
       {results?.length ? <div className="space-y-2">{results.map((entry) => (
         <div key={`${entry.siren}-${entry.siret}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] p-4">
-          <div className="flex min-w-0 gap-3"><Building2 className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" /><div><p className="font-semibold text-[var(--foreground)]">{entry.name}</p><p className="text-xs text-[var(--muted-foreground)]">{entry.siret ? `SIRET ${entry.siret}` : `SIREN ${entry.siren}`}{entry.nafCode ? ` · NAF ${entry.nafCode}` : ""}</p>{entry.address ? <p className="mt-1 text-sm text-[var(--muted-foreground)]">{entry.address}</p> : null}</div></div>
+          <div className="flex min-w-0 gap-3"><Building2 className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" /><div><p className="font-semibold text-[var(--foreground)]">{entry.name}</p><p className="text-xs text-[var(--muted-foreground)]">{entry.siret ? `SIRET ${entry.siret}` : `SIREN ${entry.siren}`}{entry.nafCode ? ` · NAF ${entry.nafCode}` : ""}</p>{entry.activityLabel ? <p className="mt-1 text-sm text-[var(--muted-foreground)]">{entry.activityLabel}</p> : null}{entry.address ? <p className="mt-1 text-sm text-[var(--muted-foreground)]">{entry.address}</p> : null}</div></div>
           <Button size="sm" type="button" onClick={() => onSelect(entry)}>{selectLabel}</Button>
         </div>
       ))}</div> : null}
