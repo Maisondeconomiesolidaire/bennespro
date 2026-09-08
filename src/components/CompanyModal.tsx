@@ -8,7 +8,7 @@ import { Button } from "./ui/Button";
 import { Field, Input, Textarea } from "./ui/Field";
 import { Select } from "./ui/Select";
 import { UnderlineTabs } from "./ui/UnderlineTabs";
-import { COMPANY_TYPE_OPTIONS, type CompanyType } from "../lib/companyProfile";
+import { COMPANY_TYPE_OPTIONS, TRADE_CATEGORY_OPTIONS, type CompanyType, type TradeCategory } from "../lib/companyProfile";
 import { CompanyDocumentsTab, CompanyMessagesTab } from "./crm/CompanyTabs";
 import { CompanyQrModal } from "./CompanyQrModal";
 
@@ -17,6 +17,7 @@ export type CompanyForm = {
   siret: string;
   nafCode: string;
   activityLabel: string;
+  tradeCategory: TradeCategory | "";
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -31,6 +32,7 @@ const EMPTY: CompanyForm = {
   siret: "",
   nafCode: "",
   activityLabel: "",
+  tradeCategory: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -82,6 +84,7 @@ export function CompanyModal({
         siret: existing.siret ?? "",
         nafCode: existing.nafCode ?? "",
         activityLabel: existing.activityLabel ?? "",
+        tradeCategory: existing.tradeCategory ?? "",
         companyType: existing.companyType ?? "",
         companyTypeOther: existing.companyTypeOther ?? "",
         address: existing.address ?? "",
@@ -110,6 +113,7 @@ export function CompanyModal({
         siret: form.siret.trim() || undefined,
         nafCode: form.nafCode.trim() || undefined,
         activityLabel: form.activityLabel.trim() || undefined,
+        tradeCategory: form.tradeCategory || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -179,6 +183,9 @@ export function CompanyModal({
             </Field>
             <Field label="Activité principale">
               <Input value={form.activityLabel} onChange={(e) => set("activityLabel")(e.target.value)} placeholder="Ex. Travaux de menuiserie bois et PVC" />
+            </Field>
+            <Field label="Catégorie métier">
+              <Select<TradeCategory> value={form.tradeCategory} onChange={(value) => set("tradeCategory")(value)} options={TRADE_CATEGORY_OPTIONS} placeholder="— Sélectionner —" />
             </Field>
             <Field label="Profil">
               <Select<CompanyType>

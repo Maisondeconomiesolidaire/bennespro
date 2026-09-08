@@ -18,7 +18,7 @@ import type { Doc } from "../../convex/_generated/dataModel";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useAccess } from "../components/RequirePermission";
 import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
-import { companyTypeLabel } from "../lib/companyProfile";
+import { companyTypeLabel, tradeCategoryLabel } from "../lib/companyProfile";
 import { useToast } from "../components/ui/Toast";
 import { CompanyDirectory } from "../components/CompanyDirectory";
 import { CompanyModal, type CompanyForm } from "../components/CompanyModal";
@@ -121,6 +121,7 @@ export function Entreprises() {
               <p className="mt-3 font-semibold text-[var(--foreground)]">{c.name}</p>
               {c.siret ? <p className="text-xs text-[var(--muted-foreground)]">SIRET {c.siret}</p> : null}
               {c.activityLabel ? <p className="mt-1 text-xs text-[var(--muted-foreground)]">{c.activityLabel}</p> : null}
+              {c.tradeCategory ? <p className="mt-1 text-xs font-medium text-brand-700">{tradeCategoryLabel(c.tradeCategory)}</p> : null}
               {c.contactPhone ? <p className="text-xs text-[var(--muted-foreground)]">{c.contactPhone}</p> : null}
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 <ComplianceChip label="Convention" status={c.compliance.convention} />
@@ -133,7 +134,7 @@ export function Entreprises() {
       </> : (
         <CompanyDirectory
           selectLabel="Ajouter cette entreprise"
-          onSelect={(entry) => setDirectoryPrefill({ name: entry.name, siret: entry.siret, nafCode: entry.nafCode, activityLabel: entry.activityLabel, address: entry.address })}
+          onSelect={(entry) => setDirectoryPrefill({ name: entry.name, siret: entry.siret, nafCode: entry.nafCode, activityLabel: entry.activityLabel, tradeCategory: entry.tradeCategory, address: entry.address })}
         />
       )}
 
@@ -279,6 +280,7 @@ function CompanyDetailModal({
               <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <Detail label="SIRET" value={company.siret} />
                 <Detail label="Activité principale" value={company.activityLabel} />
+                <Detail label="Catégorie métier" value={tradeCategoryLabel(company.tradeCategory)} />
                 <Detail label="Code NAF / APE" value={company.nafCode} />
                 <Detail label="Profil" value={companyTypeLabel(company.companyType, company.companyTypeOther)} />
                 <Detail label="Téléphone" value={company.contactPhone} />

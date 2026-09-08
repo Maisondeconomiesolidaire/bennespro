@@ -28,7 +28,7 @@ import { FileButton } from "../../components/ui/FileButton";
 import { Checkbox } from "../../components/ui/Checkbox";
 import { useToast } from "../../components/ui/Toast";
 import { useUpload } from "../../lib/useUpload";
-import { COMPANY_TYPE_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType } from "../../lib/companyProfile";
+import { COMPANY_TYPE_OPTIONS, TRADE_CATEGORY_OPTIONS, docTypeLabel, REQUIRED_DOCS, type CompanyType, type DocType, type TradeCategory } from "../../lib/companyProfile";
 import { generateBonDepotPdf } from "../../lib/bonDepotPdf";
 import { unitLabel, MATERIALS, ECODDS_SUBMATERIALS } from "../../lib/materials";
 import { cn } from "../../lib/cn";
@@ -228,6 +228,7 @@ type InfoForm = {
   siret: string;
   nafCode: string;
   activityLabel: string;
+  tradeCategory: TradeCategory | "";
   companyType: CompanyType | "";
   companyTypeOther: string;
   address: string;
@@ -247,6 +248,7 @@ const EMPTY_INFO: InfoForm = {
   siret: "",
   nafCode: "",
   activityLabel: "",
+  tradeCategory: "",
   companyType: "",
   companyTypeOther: "",
   address: "",
@@ -287,6 +289,7 @@ export function AccountInfo() {
       siret: company.siret ?? "",
       nafCode: company.nafCode ?? "",
       activityLabel: company.activityLabel ?? "",
+      tradeCategory: company.tradeCategory ?? "",
       companyType: company.companyType ?? "",
       companyTypeOther: company.companyTypeOther ?? "",
       address: company.address ?? "",
@@ -317,7 +320,7 @@ export function AccountInfo() {
     try {
       const [entry] = await searchDirectory({ query: siret });
       if (!entry) return toast.error("Aucune entreprise active trouvée pour ce SIRET.");
-      setForm((current) => ({ ...current, siret: entry.siret || siret, name: entry.name, nafCode: entry.nafCode, activityLabel: entry.activityLabel, address: entry.address }));
+      setForm((current) => ({ ...current, siret: entry.siret || siret, name: entry.name, nafCode: entry.nafCode, activityLabel: entry.activityLabel, tradeCategory: entry.tradeCategory ?? "", address: entry.address }));
       setDetailsVisible(true);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Recherche impossible."); } finally { setLookupBusy(false); }
   }
@@ -335,6 +338,7 @@ export function AccountInfo() {
         siret: form.siret.trim() || undefined,
         nafCode: form.nafCode.trim() || undefined,
         activityLabel: form.activityLabel.trim() || undefined,
+        tradeCategory: form.tradeCategory || undefined,
         companyType: form.companyType || undefined,
         companyTypeOther:
           form.companyType === "autre" ? form.companyTypeOther.trim() || undefined : undefined,
@@ -404,6 +408,9 @@ export function AccountInfo() {
         </Field>
         <Field label="Activité principale (Optionnel)">
           <Input value={form.activityLabel} onChange={(e) => set("activityLabel", e.target.value)} placeholder="Ex. Travaux de menuiserie bois et PVC" />
+        </Field>
+        <Field label="Catégorie métier (Optionnel)">
+          <Select<TradeCategory> value={form.tradeCategory} onChange={(value) => set("tradeCategory", value)} options={TRADE_CATEGORY_OPTIONS} placeholder="— Sélectionner —" />
         </Field>
         <Field label="Profil (Optionnel)">
           <Select<CompanyType>

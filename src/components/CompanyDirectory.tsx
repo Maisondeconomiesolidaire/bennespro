@@ -4,6 +4,7 @@ import { Building2, Search } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "./ui/Button";
 import { Field, Input } from "./ui/Field";
+import type { TradeCategory } from "../lib/companyProfile";
 
 export type CompanyDirectoryEntry = {
   name: string;
@@ -12,6 +13,7 @@ export type CompanyDirectoryEntry = {
   address: string;
   nafCode: string;
   activityLabel: string;
+  tradeCategory?: TradeCategory;
 };
 
 export function CompanyDirectory({ onSelect, selectLabel = "Utiliser cette entreprise" }: {
