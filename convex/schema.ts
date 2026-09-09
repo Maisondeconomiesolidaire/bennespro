@@ -1646,6 +1646,20 @@ export default defineSchema(
     start: v.optional(v.number()),
     end: v.optional(v.number()),
     images: v.array(v.id("_storage")),
+    /**
+     * Champs communs avec le calendrier de la Recyclerie
+     * (`recycappCalendarEvents`) : les deux calendriers se lisent côte à côte
+     * dans l'espace partagé, ils décrivent donc un évènement de la même façon.
+     */
+    animationType: v.optional(v.string()),
+    structure: v.optional(v.string()),
+    activity: v.optional(v.string()),
+    relatedEvent: v.optional(v.string()),
+    targetAudience: v.optional(v.string()),
+    organizer: v.optional(v.string()),
+    workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
+    attachments: v.optional(v.array(v.id("_storage"))),
+    urls: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_authorClerkId", ["authorClerkId"])
@@ -1884,6 +1898,29 @@ export default defineSchema(
     .index("by_period", ["year", "month"])
     .index("by_site_and_period", ["site", "year", "month", "week"]),
 
+  /**
+   * Clients Klyd saisis à la main.
+   *
+   * L'essentiel des clients se déduit des emails Vinted, qui portent le nom et
+   * l'adresse de facturation de l'acheteur. Cette table ne stocke que ce qui
+   * n'en vient pas : une vente de la main à la main, un contact pris en
+   * boutique, ou un complément (téléphone, note) sur un acheteur connu.
+   */
+  klydeCustomers: defineTable({
+    name: v.string(),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    /** Pseudo Vinted, quand il permet de rapprocher le contact d'un acheteur. */
+    vintedPseudo: v.optional(v.string()),
+    note: v.optional(v.string()),
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
+    createdByClerkId: v.string(),
+    createdByName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+
   klydeItems: defineTable({
     photos: v.array(v.id("_storage")),
     title: v.string(),
@@ -1920,12 +1957,14 @@ export default defineSchema(
     // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
     vintedExtensionCount: v.optional(v.number()),
     vintedLastExtendedAt: v.optional(v.number()),
-    /**
-     * Date d'encaissement, posée au passage en « gagné ». Les rapports de
-     * vente se groupent par mois : sans cette date, un article vendu ne peut
-     * être rattaché qu'à `updatedAt`, que la moindre retouche déplace.
-     */
+    /** Date historique d'encaissement, conservée pour les anciens articles. */
     soldAt: v.optional(v.number()),
+    /**
+     * Date à laquelle l'article est enregistré « Vendu » dans le workflow.
+     * Les rapports se basent sur cette étape, et non sur la confirmation
+     * ultérieure « Gagné ».
+     */
+    saleRecordedAt: v.optional(v.number()),
     // Décision prise lorsqu'un article sort de Stock B.
     stockBDisposition: v.optional(v.union(
       v.literal("vente_exceptionnelle"),
@@ -2221,6 +2260,12 @@ export default defineSchema(
     completed: v.optional(v.boolean()),
     /** Salariés mobilisés sur l'évènement (équipe Recyclerie). */
     workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
+    /**
+     * Visible dans l'espace partagé de Mes Outils. Absent vaut partagé : les
+     * évènements du calendrier Recyclerie y figurent tous par défaut, et le
+     * bouton de la fiche sert à en retirer un plutôt qu'à les ajouter un à un.
+     */
+    sharedInMesOutils: v.optional(v.boolean()),
     startAt: v.number(),
     endAt: v.number(),
     attachments: v.array(v.id("_storage")),
