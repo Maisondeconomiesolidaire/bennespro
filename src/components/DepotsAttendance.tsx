@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
-import { Building2, CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { Building2, CalendarDays, ChevronLeft, ChevronRight, Clock, Download } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
@@ -146,6 +146,22 @@ function emptyBuckets(period: Period, start: Date, end: Date): Bucket[] {
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return `${count} ${count > 1 ? pluralForm : singular}`;
+}
+
+function csvCell(value: string | number) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
+  const content = `\ufeffsep=;\r\n${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 const HOURLY_SLOT_COUNT = (END_MINUTE - START_MINUTE) / STEP_MINUTES;
@@ -355,7 +371,7 @@ export function DepotsAttendance({ depots }: { depots: Array<{ createdAt: number
 
 /** Rapport de fréquentation et d'inscriptions d'entreprises par période. */
 export function AttendanceReport() {
-  const [period, setPeriod] = useState<Period>("day");
+  const [period, setPeriod] = useState<Period>("year");
   const [anchor, setAnchor] = useState(() => new Date());
   const [hovered, setHovered] = useState<number | null>(null);
   const bounds = useMemo(() => periodBounds(period, anchor), [period, anchor]);
@@ -407,6 +423,25 @@ export function AttendanceReport() {
           : "cette année";
   const nonEmptyBuckets = buckets.filter((bucket) => bucket.depots > 0 || bucket.companies > 0);
 
+  function exportReport() {
+    if (!stats) return;
+    const periodName = PERIODS.find((option) => option.value === period)?.label ?? period;
+    const rows: Array<Array<string | number>> = [
+      ["Rapport Bennes Pro", "", ""],
+      ["Période", bounds.label, ""],
+      ["Vue", periodName, ""],
+      ["", "", ""],
+      ["Détail", "Passages", "Inscriptions d'entreprises"],
+      ["Total", depotTimestamps.length, companyTimestamps.length],
+      ...buckets.map((bucket) => [bucket.label, bucket.depots, bucket.companies]),
+    ];
+    if (period === "day" && (depotsOutside > 0 || companiesOutside > 0)) {
+      rows.push(["Hors plage 07:00–19:00", depotsOutside, companiesOutside]);
+    }
+    const suffix = period === "year" ? String(bounds.start.getFullYear()) : bounds.start.toLocaleDateString("sv-SE");
+    downloadCsv(`rapport-bennes-pro-${period}-${suffix}.csv`, rows);
+  }
+
   return (
     <div className="space-y-4">
       <div className="glass-card flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] p-3 sm:p-4">
@@ -435,7 +470,7 @@ export function AttendanceReport() {
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -467,6 +502,9 @@ export function AttendanceReport() {
               Aujourd’hui
             </Button>
           ) : null}
+          <Button variant="secondary" size="sm" onClick={exportReport} disabled={stats === undefined}>
+            <Download className="h-4 w-4" /> Exporter Excel / CSV
+          </Button>
         </div>
       </div>
 
