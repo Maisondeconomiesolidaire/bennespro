@@ -8,6 +8,7 @@ import { Documents } from "./pages/Documents";
 import { Messages } from "./pages/Messages";
 import { Dib } from "./pages/Dib";
 import { Frequentation } from "./pages/Frequentation";
+import { Rapport } from "./pages/Rapport";
 import { Compte } from "./pages/Compte";
 import { Profils } from "./pages/Profils";
 import { PublicLayout } from "./components/public/PublicLayout";
@@ -93,6 +94,14 @@ export default function App() {
             element={
               <RequirePermission pageKey={PAGE_DEPOTS}>
                 <Frequentation />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="rapport"
+            element={
+              <RequirePermission pageKey={PAGE_DEPOTS}>
+                <Rapport />
               </RequirePermission>
             }
           />

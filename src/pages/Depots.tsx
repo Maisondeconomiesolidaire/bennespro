@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck, BadgeEuro, Clock, PackagePlus, Pencil, Recycle } from "lucide-react";
+import { BadgeCheck, BadgeEuro, ChartNoAxesCombined, Clock, PackagePlus, Pencil, Recycle } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { DIB_MATERIAL, WOOD_MATERIAL } from "../lib/materials";
 import { useAppActions } from "../lib/appActions";
@@ -11,7 +11,7 @@ import { Input } from "../components/ui/Field";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FullSpinner, Spinner } from "../components/ui/Spinner";
 import { DepotsTable, DepotStats } from "../components/DepotsTable";
-import { DepotsAttendance } from "../components/DepotsAttendance";
+import { AttendanceReport, DepotsAttendance } from "../components/DepotsAttendance";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 
@@ -24,14 +24,17 @@ const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" 
 export function Depots({
   dibOnly = false,
   attendance = false,
+  report = false,
 }: {
   dibOnly?: boolean;
-  /** Onglet Fréquentation : statistiques de passages et d'inscriptions par période. */
+  /** Onglet Fréquentation historique : passages par tranche horaire. */
   attendance?: boolean;
+  /** Onglet Rapport : passages et inscriptions par jour, semaine, mois ou année. */
+  report?: boolean;
 }) {
   const navigate = useNavigate();
   const { openNewDepot } = useAppActions();
-  const depots = useQuery(api.bennespro.listDepots, attendance ? "skip" : {});
+  const depots = useQuery(api.bennespro.listDepots, report ? "skip" : {});
   const settings = useQuery(api.bennespro.getDibSettings);
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const [search, setSearch] = useState("");
@@ -134,11 +137,18 @@ export function Depots({
           { key: "all", label: "Tous les dépôts" },
           { key: "dib", label: "Facturation", icon: Recycle },
           { key: "frequentation", label: "Fréquentation", icon: Clock },
+          { key: "report", label: "Rapport", icon: ChartNoAxesCombined },
         ]}
-        value={attendance ? "frequentation" : dibOnly ? "dib" : "all"}
+        value={report ? "report" : attendance ? "frequentation" : dibOnly ? "dib" : "all"}
         onChange={(key) =>
           navigate(
-            key === "dib" ? "/crm/dib" : key === "frequentation" ? "/crm/frequentation" : "/crm",
+            key === "dib"
+              ? "/crm/dib"
+              : key === "frequentation"
+                ? "/crm/frequentation"
+                : key === "report"
+                  ? "/crm/rapport"
+                  : "/crm",
           )
         }
       />
@@ -206,11 +216,11 @@ export function Depots({
         {priceError ? <p className="mt-2 text-sm text-red-600">{priceError}</p> : null}
       </div>
 
-      {!attendance ? (
+      {!report ? (
         <DepotStats depots={source} countLabel={dibOnly ? "Dépôts facturables" : "Dépôts au total"} />
       ) : null}
 
-      {!attendance ? (
+      {!report ? (
         <div className="flex flex-wrap items-end gap-3">
           <Input
             value={search}
@@ -218,7 +228,7 @@ export function Depots({
             placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
             className="max-w-md flex-1"
           />
-          <div className="flex items-end gap-2">
+          <div className={attendance ? "hidden" : "flex items-end gap-2"}>
             <TimeInput label="De" value={fromTime} onChange={setFromTime} />
             <TimeInput label="À" value={toTime} onChange={setToTime} />
             {hourFilterActive ? (
@@ -237,17 +247,19 @@ export function Depots({
         </div>
       ) : null}
 
-      {hourFilterActive && !attendance ? (
+      {hourFilterActive && !attendance && !report ? (
         <p className="-mt-2 text-sm text-[var(--muted-foreground)]">
           {filtered.length} dépôt{filtered.length > 1 ? "s" : ""} enregistré
           {filtered.length > 1 ? "s" : ""} {describeHourRange(hourRange)}.
         </p>
       ) : null}
 
-      {attendance ? (
-        <DepotsAttendance />
+      {report ? (
+        <AttendanceReport />
       ) : depots === undefined ? (
         <FullSpinner />
+      ) : attendance ? (
+        <DepotsAttendance depots={searched} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Recycle className="h-8 w-8" />}

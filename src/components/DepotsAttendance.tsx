@@ -148,8 +148,213 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return `${count} ${count > 1 ? pluralForm : singular}`;
 }
 
-/** Fréquentation et inscriptions d'entreprises sur une période navigable. */
-export function DepotsAttendance() {
+const HOURLY_SLOT_COUNT = (END_MINUTE - START_MINUTE) / STEP_MINUTES;
+const HOURLY_PLOT = { width: 960, height: 260, top: 12, right: 8, bottom: 28, left: 34 };
+const HOURLY_BAR_GAP = 2;
+type HourSlot = { start: number; end: number; count: number };
+
+/** Fréquentation historique par tranche de quinze minutes, de 7h à 19h. */
+export function DepotsAttendance({ depots }: { depots: Array<{ createdAt: number }> }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  const { slots, outside, total, busiest } = useMemo(() => {
+    const counts = new Array<number>(HOURLY_SLOT_COUNT).fill(0);
+    let outsideRange = 0;
+    for (const depot of depots) {
+      const at = new Date(depot.createdAt);
+      const minuteOfDay = at.getHours() * 60 + at.getMinutes();
+      const index = Math.floor((minuteOfDay - START_MINUTE) / STEP_MINUTES);
+      if (index < 0 || index >= HOURLY_SLOT_COUNT) {
+        outsideRange++;
+        continue;
+      }
+      counts[index]++;
+    }
+    const built: HourSlot[] = counts.map((count, index) => ({
+      start: START_MINUTE + index * STEP_MINUTES,
+      end: START_MINUTE + (index + 1) * STEP_MINUTES,
+      count,
+    }));
+    const peak = built.reduce<HourSlot | null>(
+      (best, slot) => (slot.count > 0 && (!best || slot.count > best.count) ? slot : best),
+      null,
+    );
+    return {
+      slots: built,
+      outside: outsideRange,
+      total: counts.reduce((sum, count) => sum + count, 0),
+      busiest: peak,
+    };
+  }, [depots]);
+
+  const maxCount = Math.max(1, ...slots.map((slot) => slot.count));
+  const tickStep = Math.max(1, Math.ceil(maxCount / 4));
+  const ticks: number[] = [];
+  for (let value = 0; value <= maxCount; value += tickStep) ticks.push(value);
+
+  const plotWidth = HOURLY_PLOT.width - HOURLY_PLOT.left - HOURLY_PLOT.right;
+  const plotHeight = HOURLY_PLOT.height - HOURLY_PLOT.top - HOURLY_PLOT.bottom;
+  const bandWidth = plotWidth / HOURLY_SLOT_COUNT;
+  const barWidth = Math.max(3, bandWidth - HOURLY_BAR_GAP);
+  const baseline = HOURLY_PLOT.top + plotHeight;
+  const y = (count: number) => baseline - (count / maxCount) * plotHeight;
+  const active = hovered !== null ? slots[hovered] : null;
+
+  return (
+    <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--foreground)]">
+            <Clock className="h-4 w-4 text-brand-600" />
+            Fréquentation par tranche de 15 minutes
+          </h2>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+            {total} dépôt{total > 1 ? "s" : ""} entre 07:00 et 19:00
+            {busiest
+              ? ` · pointe de ${busiest.count} dépôt${busiest.count > 1 ? "s" : ""} entre ${timeLabel(busiest.start)} et ${timeLabel(busiest.end)}`
+              : ""}
+            {outside > 0
+              ? ` · ${outside} hors de cette plage, non représenté${outside > 1 ? "s" : ""}`
+              : ""}
+          </p>
+        </div>
+      </div>
+
+      <div className="relative mt-4">
+        <svg
+          viewBox={`0 0 ${HOURLY_PLOT.width} ${HOURLY_PLOT.height}`}
+          className="w-full"
+          role="img"
+          aria-label="Nombre de dépôts par tranche de quinze minutes, de 7h à 19h"
+          onMouseLeave={() => setHovered(null)}
+        >
+          {ticks.map((tick) => (
+            <g key={tick}>
+              <line
+                x1={HOURLY_PLOT.left}
+                x2={HOURLY_PLOT.width - HOURLY_PLOT.right}
+                y1={y(tick)}
+                y2={y(tick)}
+                stroke="var(--border)"
+                strokeWidth={1}
+              />
+              <text
+                x={HOURLY_PLOT.left - 8}
+                y={y(tick) + 4}
+                textAnchor="end"
+                className="fill-[var(--muted-foreground)] text-[11px]"
+              >
+                {tick}
+              </text>
+            </g>
+          ))}
+
+          {slots.map((slot, index) => {
+            const x = HOURLY_PLOT.left + index * bandWidth;
+            const height = baseline - y(slot.count);
+            const radius = Math.min(4, barWidth / 2, Math.max(height, 0));
+            const isActive = hovered === index;
+            return (
+              <g key={slot.start}>
+                <rect
+                  x={x}
+                  y={HOURLY_PLOT.top}
+                  width={bandWidth}
+                  height={plotHeight}
+                  fill={isActive ? "var(--accent)" : "transparent"}
+                  onMouseEnter={() => setHovered(index)}
+                />
+                {slot.count > 0 ? (
+                  <path
+                    d={`M ${x + HOURLY_BAR_GAP / 2} ${baseline}
+                        V ${y(slot.count) + radius}
+                        a ${radius} ${radius} 0 0 1 ${radius} ${-radius}
+                        h ${barWidth - radius * 2}
+                        a ${radius} ${radius} 0 0 1 ${radius} ${radius}
+                        V ${baseline} Z`}
+                    fill={isActive ? "var(--color-brand-700)" : "var(--color-brand-500)"}
+                    pointerEvents="none"
+                  />
+                ) : null}
+              </g>
+            );
+          })}
+
+          {slots.map((slot, index) =>
+            slot.start % 60 === 0 ? (
+              <text
+                key={`tick-${slot.start}`}
+                x={HOURLY_PLOT.left + index * bandWidth + bandWidth / 2}
+                y={HOURLY_PLOT.height - 8}
+                textAnchor="middle"
+                className="fill-[var(--muted-foreground)] text-[11px]"
+              >
+                {Math.floor(slot.start / 60)}h
+              </text>
+            ) : null,
+          )}
+
+          <line
+            x1={HOURLY_PLOT.left}
+            x2={HOURLY_PLOT.width - HOURLY_PLOT.right}
+            y1={baseline}
+            y2={baseline}
+            stroke="var(--border)"
+            strokeWidth={1}
+          />
+        </svg>
+
+        {active ? (
+          <div
+            className="pointer-events-none absolute -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs shadow-lg"
+            style={{
+              left: `${Math.min(92, Math.max(8, ((HOURLY_PLOT.left + (hovered! + 0.5) * bandWidth) / HOURLY_PLOT.width) * 100))}%`,
+              bottom: "100%",
+            }}
+          >
+            <p className="font-semibold text-[var(--foreground)]">
+              {timeLabel(active.start)} – {timeLabel(active.end)}
+            </p>
+            <p className="text-[var(--muted-foreground)]">
+              {active.count} dépôt{active.count > 1 ? "s" : ""}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm text-[var(--muted-foreground)]">
+          Voir le détail chiffré
+        </summary>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-[var(--muted-foreground)]">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Tranche</th>
+                <th className="px-3 py-2 text-left font-medium">Dépôts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slots
+                .filter((slot) => slot.count > 0)
+                .map((slot) => (
+                  <tr key={slot.start} className="border-t border-[var(--border)]">
+                    <td className="px-3 py-1.5 text-[var(--foreground)]">
+                      {timeLabel(slot.start)} – {timeLabel(slot.end)}
+                    </td>
+                    <td className="px-3 py-1.5 text-[var(--muted-foreground)]">{slot.count}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+/** Rapport de fréquentation et d'inscriptions d'entreprises par période. */
+export function AttendanceReport() {
   const [period, setPeriod] = useState<Period>("day");
   const [anchor, setAnchor] = useState(() => new Date());
   const [hovered, setHovered] = useState<number | null>(null);
