@@ -23,6 +23,12 @@ const PERIODS: Array<{ value: Period; label: string }> = [
   { value: "month", label: "Mois" },
   { value: "year", label: "Année" },
 ];
+const FILE_PERIOD_NAMES: Record<Period, string> = {
+  day: "jour",
+  week: "semaine",
+  month: "mois",
+  year: "annee",
+};
 const STEP_MINUTES = 15;
 const START_MINUTE = 7 * 60;
 const END_MINUTE = 19 * 60;
@@ -149,11 +155,12 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
 }
 
 function csvCell(value: string | number) {
+  if (typeof value === "number") return String(value);
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
-  const content = `\ufeffsep=;\r\n${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}`;
+  const content = `\ufeffsep=;\r\n${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}\r\n`;
   const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
@@ -162,6 +169,24 @@ function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function fileDate(date: Date) {
+  return [
+    String(date.getDate()).padStart(2, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getFullYear()),
+  ].join("-");
+}
+
+function reportFilename(period: Period, start: Date, end: Date) {
+  const prefix = `rapport-bennes-pro-${FILE_PERIOD_NAMES[period]}`;
+  if (period === "day") return `${prefix}-${fileDate(start)}.csv`;
+  if (period === "week") return `${prefix}-du-${fileDate(start)}-au-${fileDate(addDays(end, -1))}.csv`;
+  if (period === "month") {
+    return `${prefix}-${String(start.getMonth() + 1).padStart(2, "0")}-${start.getFullYear()}.csv`;
+  }
+  return `${prefix}-${start.getFullYear()}.csv`;
 }
 
 const HOURLY_SLOT_COUNT = (END_MINUTE - START_MINUTE) / STEP_MINUTES;
@@ -427,19 +452,19 @@ export function AttendanceReport() {
     if (!stats) return;
     const periodName = PERIODS.find((option) => option.value === period)?.label ?? period;
     const rows: Array<Array<string | number>> = [
-      ["Rapport Bennes Pro", "", ""],
-      ["Période", bounds.label, ""],
-      ["Vue", periodName, ""],
+      ["Rapport Bennes Pro - Passages et inscriptions", "", ""],
+      ["Période analysée", bounds.label, ""],
+      ["Type de vue", periodName, ""],
+      ["Date d'export", new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(new Date()), ""],
       ["", "", ""],
-      ["Détail", "Passages", "Inscriptions d'entreprises"],
-      ["Total", depotTimestamps.length, companyTimestamps.length],
+      ["Période détaillée", "Nombre de passages", "Nombre d'inscriptions d'entreprises"],
+      ["TOTAL", depotTimestamps.length, companyTimestamps.length],
       ...buckets.map((bucket) => [bucket.label, bucket.depots, bucket.companies]),
     ];
     if (period === "day" && (depotsOutside > 0 || companiesOutside > 0)) {
       rows.push(["Hors plage 07:00–19:00", depotsOutside, companiesOutside]);
     }
-    const suffix = period === "year" ? String(bounds.start.getFullYear()) : bounds.start.toLocaleDateString("sv-SE");
-    downloadCsv(`rapport-bennes-pro-${period}-${suffix}.csv`, rows);
+    downloadCsv(reportFilename(period, bounds.start, bounds.end), rows);
   }
 
   return (
@@ -503,7 +528,7 @@ export function AttendanceReport() {
             </Button>
           ) : null}
           <Button variant="secondary" size="sm" onClick={exportReport} disabled={stats === undefined}>
-            <Download className="h-4 w-4" /> Exporter Excel / CSV
+            <Download className="h-4 w-4" /> Exporter en CSV (Excel)
           </Button>
         </div>
       </div>
