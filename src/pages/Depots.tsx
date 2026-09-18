@@ -26,12 +26,12 @@ export function Depots({
   attendance = false,
 }: {
   dibOnly?: boolean;
-  /** Onglet Fréquentation : le même jeu de dépôts, lu par tranche horaire. */
+  /** Onglet Fréquentation : statistiques de passages et d'inscriptions par période. */
   attendance?: boolean;
 }) {
   const navigate = useNavigate();
   const { openNewDepot } = useAppActions();
-  const depots = useQuery(api.bennespro.listDepots);
+  const depots = useQuery(api.bennespro.listDepots, attendance ? "skip" : {});
   const settings = useQuery(api.bennespro.getDibSettings);
   const setDibPrice = useMutation(api.bennespro.setDibPrice);
   const [search, setSearch] = useState("");
@@ -206,32 +206,36 @@ export function Depots({
         {priceError ? <p className="mt-2 text-sm text-red-600">{priceError}</p> : null}
       </div>
 
-      <DepotStats depots={source} countLabel={dibOnly ? "Dépôts facturables" : "Dépôts au total"} />
+      {!attendance ? (
+        <DepotStats depots={source} countLabel={dibOnly ? "Dépôts facturables" : "Dépôts au total"} />
+      ) : null}
 
-      <div className="flex flex-wrap items-end gap-3">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
-          className="max-w-md flex-1"
-        />
-        <div className={attendance ? "hidden" : "flex items-end gap-2"}>
-          <TimeInput label="De" value={fromTime} onChange={setFromTime} />
-          <TimeInput label="À" value={toTime} onChange={setToTime} />
-          {hourFilterActive ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setFromTime("");
-                setToTime("");
-              }}
-            >
-              Effacer
-            </Button>
-          ) : null}
+      {!attendance ? (
+        <div className="flex flex-wrap items-end gap-3">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher (entreprise, déposant, chantier, n°)…"
+            className="max-w-md flex-1"
+          />
+          <div className="flex items-end gap-2">
+            <TimeInput label="De" value={fromTime} onChange={setFromTime} />
+            <TimeInput label="À" value={toTime} onChange={setToTime} />
+            {hourFilterActive ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFromTime("");
+                  setToTime("");
+                }}
+              >
+                Effacer
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {hourFilterActive && !attendance ? (
         <p className="-mt-2 text-sm text-[var(--muted-foreground)]">
@@ -240,10 +244,10 @@ export function Depots({
         </p>
       ) : null}
 
-      {depots === undefined ? (
+      {attendance ? (
+        <DepotsAttendance />
+      ) : depots === undefined ? (
         <FullSpinner />
-      ) : attendance ? (
-        <DepotsAttendance depots={searched} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Recycle className="h-8 w-8" />}
