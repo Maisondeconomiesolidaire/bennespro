@@ -36,7 +36,7 @@ export function Depots({
   const { openNewDepot } = useAppActions();
   const depots = useQuery(api.bennespro.listDepots, report ? "skip" : {});
   const settings = useQuery(api.bennespro.getDibSettings);
-  const setDibPrice = useMutation(api.bennespro.setDibPrice);
+  const setMaterialPrices = useMutation(api.bennespro.setMaterialPrices);
   const [search, setSearch] = useState("");
   // Plage horaire de saisie, à la minute et bornes incluses : 07:00 → 08:00
   // retient 08:00 pile, mais pas 08:01.
@@ -44,7 +44,8 @@ export function Depots({
   const [toTime, setToTime] = useState("");
 
   const [editingPrice, setEditingPrice] = useState(false);
-  const [priceInput, setPriceInput] = useState("");
+  const [dibPriceInput, setDibPriceInput] = useState("");
+  const [woodPriceInput, setWoodPriceInput] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
   const [priceError, setPriceError] = useState<string | null>(null);
 
@@ -102,15 +103,19 @@ export function Depots({
   const hourFilterActive = hourRange.from !== null || hourRange.to !== null;
 
   async function handleSavePrice() {
-    const parsed = Number(priceInput.replace(",", "."));
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setPriceError("Saisissez un prix en euros par kg, ex. 0,32.");
+    const dib = Number(dibPriceInput.replace(",", "."));
+    const wood = Number(woodPriceInput.replace(",", "."));
+    if (!Number.isFinite(dib) || dib <= 0 || !Number.isFinite(wood) || wood <= 0) {
+      setPriceError("Saisissez les tarifs DIB et bois en euros par kg, ex. 0,32.");
       return;
     }
     setSavingPrice(true);
     setPriceError(null);
     try {
-      await setDibPrice({ priceCentsPerKg: Math.round(parsed * 10000) / 100 });
+      await setMaterialPrices({
+        dibPriceCentsPerKg: Math.round(dib * 10000) / 100,
+        woodPriceCentsPerKg: Math.round(wood * 10000) / 100,
+      });
       setEditingPrice(false);
     } catch (err) {
       setPriceError(err instanceof Error ? err.message : "Échec de l'enregistrement du prix.");
@@ -120,6 +125,7 @@ export function Depots({
   }
 
   const priceEuros = settings ? settings.priceCentsPerKg / 100 : null;
+  const woodPriceEuros = settings ? settings.woodPriceCentsPerKg / 100 : null;
 
   return (
     <div className="space-y-5">
@@ -161,18 +167,18 @@ export function Depots({
               <BadgeEuro className="h-6 w-6" />
             </span>
             <div>
-              <p className="text-sm font-medium text-[var(--muted-foreground)]">Prix du DIB</p>
+              <p className="text-sm font-medium text-[var(--muted-foreground)]">Tarifs des matières facturables</p>
               {settings === undefined ? (
                 <Spinner className="mt-1 h-4 w-4" />
               ) : (
                 <p className="text-2xl font-bold tracking-tight text-[var(--foreground)]">
-                  {EUR.format(priceEuros ?? 0)}
+                  DIB : {EUR.format(priceEuros ?? 0)}
                   <span className="text-sm font-semibold text-[var(--muted-foreground)]"> HT / kg</span>
                 </p>
               )}
               {settings !== undefined ? (
                 <p className="text-xs font-medium text-[var(--muted-foreground)]">
-                  Bois : {EUR.format((settings?.woodPriceCentsPerKg ?? 17) / 100)} HT / kg
+                  Bois : {EUR.format(woodPriceEuros ?? 0)} HT / kg
                 </p>
               ) : null}
             </div>
@@ -182,9 +188,9 @@ export function Depots({
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <Input
-                  value={priceInput}
-                  onChange={(e) => setPriceInput(e.target.value)}
-                  placeholder="0,32"
+                  value={dibPriceInput}
+                  onChange={(e) => setDibPriceInput(e.target.value)}
+                  placeholder="DIB · 0,32"
                   inputMode="decimal"
                   className="h-10 w-28 pr-12 text-right font-semibold"
                   autoFocus
@@ -192,6 +198,16 @@ export function Depots({
                 <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-[var(--muted-foreground)]">
                   €/kg
                 </span>
+              </div>
+              <div className="relative">
+                <Input
+                  value={woodPriceInput}
+                  onChange={(e) => setWoodPriceInput(e.target.value)}
+                  placeholder="Bois · 0,17"
+                  inputMode="decimal"
+                  className="h-10 w-28 pr-12 text-right font-semibold"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-[var(--muted-foreground)]">€/kg</span>
               </div>
               <Button size="sm" onClick={handleSavePrice} disabled={savingPrice}>
                 {savingPrice ? <Spinner className="h-4 w-4" /> : <BadgeCheck className="h-4 w-4" />} Enregistrer
@@ -204,12 +220,13 @@ export function Depots({
             <Button
               variant="secondary"
               onClick={() => {
-                setPriceInput(priceEuros !== null ? String(priceEuros).replace(".", ",") : "0,32");
+                setDibPriceInput(priceEuros !== null ? String(priceEuros).replace(".", ",") : "0,32");
+                setWoodPriceInput(woodPriceEuros !== null ? String(woodPriceEuros).replace(".", ",") : "0,17");
                 setEditingPrice(true);
               }}
               disabled={settings === undefined}
             >
-              <Pencil className="h-4 w-4" /> Modifier le prix
+              <Pencil className="h-4 w-4" /> Modifier les tarifs
             </Button>
           )}
         </div>
