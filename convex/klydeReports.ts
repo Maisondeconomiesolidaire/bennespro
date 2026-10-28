@@ -12,6 +12,13 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
+import {
+  isRecordedKlydeSale as isRecordedSale,
+  isReturnedKlydeSale,
+  klydeReturnCost,
+  klydeSaleAmount as saleAmount,
+} from "./lib/klydeSalesRevenue";
+import { summarizeStoreRevenue } from "./lib/klydeStoreRevenue";
 import { klydeAverageWeightKg } from "./klydeTaxonomy";
 import { bytesToBase64, esc, resendSend } from "./emails";
 import { buildPdf, CONTENT_WIDTH, type PdfColor, type PdfElement } from "./pdf";
@@ -41,6 +48,8 @@ export type ReportSale = {
   amount: number;
   /** Poids de l'article en kg : celui saisi, sinon la moyenne de sa catégorie. */
   weightKg: number;
+  /** Compteur Vinted relevé manuellement au moment de la vente. */
+  viewsAtSale?: number;
   soldAt: number;
 };
 
@@ -82,6 +91,11 @@ export type SalesReport = {
   /** Ventes en attente d'encaissement (expédiées, pas encore gagnées). */
   pendingRevenue: number;
   pendingCount: number;
+  /** Retours et remboursements de la période : ce qu'ils laissent à notre charge. */
+  returnsCost: number;
+  returnsCount: number;
+  /** Chiffre d'affaires une fois les retours déduits. */
+  netRevenue: number;
   sales: ReportSale[];
   generatedAt: number;
 };
@@ -101,27 +115,11 @@ function saleWeight(item: Doc<"klydeItems">) {
 }
 
 /**
- * Prix encaissé : le prix réel prime sur le prix affiché.
- *
- * Un `actualSalePrice` à 0 vaut « non renseigné » : le formulaire de Klyd en a
- * longtemps posé un dès qu'un article était enregistré sans passer par ce
- * champ, et ces articles pesaient alors 0 € au chiffre d'affaires.
- */
-function saleAmount(item: Doc<"klydeItems">) {
-  return item.actualSalePrice || item.price || 0;
-}
-
-/**
  * Date de vente : celle du passage en « Vendu ». Les anciens articles, qui ne
  * disposent pas encore de cette date, gardent leur date historique de gain.
  */
 function saleDate(item: Doc<"klydeItems">) {
   return item.saleRecordedAt ?? item.soldAt ?? item.updatedAt;
-}
-
-/** Une vente reste comptée après l'expédition ou la confirmation « Gagné ». */
-function isRecordedSale(item: Doc<"klydeItems">) {
-  return item.saleRecordedAt !== undefined || ["en_cours_envoi", "envoye", "gagne", "vendu"].includes(item.status);
 }
 
 function inParis(ms: number) {
@@ -165,6 +163,21 @@ async function buildReport(
   const items = await ctx.db.query("klydeItems").collect();
   const sold = items.filter(isRecordedSale);
 
+  // Retours et remboursements de la période : la vente est sortie du chiffre
+  // d'affaires par `isRecordedSale`, ce qui reste à notre charge se compte ici.
+  let returnsCost = 0;
+  let returnsCount = 0;
+  for (const item of items) {
+    if (!isReturnedKlydeSale(item)) continue;
+    const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
+    if (outlet && itemOutlet !== outlet) continue;
+    const when = inParis(item.returnedAt ?? saleDate(item));
+    if (when.year !== year) continue;
+    if (month !== null && when.month !== month) continue;
+    returnsCost += klydeReturnCost(item);
+    returnsCount += 1;
+  }
+
   const monthly = new Array(12).fill(0) as number[];
   const monthlyWeight = new Array(12).fill(0) as number[];
   const sales: ReportSale[] = [];
@@ -196,6 +209,7 @@ async function buildReport(
       outlet: itemOutlet,
       amount,
       weightKg: itemWeight,
+      viewsAtSale: item.viewsAtSale,
       soldAt,
     });
   }
@@ -207,6 +221,9 @@ async function buildReport(
     month,
     label: periodLabel(year, month),
     revenue: Math.round(revenue * 100) / 100,
+    returnsCost: Math.round(returnsCost * 100) / 100,
+    returnsCount,
+    netRevenue: Math.round((revenue - returnsCost) * 100) / 100,
     salesCount: sales.length,
     averageBasket: sales.length ? Math.round((revenue / sales.length) * 100) / 100 : 0,
     weightKg: Math.round(weightKg * 100) / 100,
@@ -693,6 +710,12 @@ export const storeReport = query({
       .query("klydeStoreRevenues")
       .withIndex("by_period", (q) => q.eq("year", year))
       .collect();
+    const annualRows = await Promise.all((["60", "76"] as const).map((storeSite) =>
+      ctx.db.query("klydeStoreAnnualRevenues")
+        .withIndex("by_site_and_year", (q) => q.eq("site", storeSite).eq("year", year))
+        .unique(),
+    ));
+    const annualTotals = annualRows.filter((entry) => entry !== null).filter((entry) => !site || entry.site === site);
     const scoped = all.filter((entry) => !site || entry.site === site);
 
     // Totaux par mois : la vue annuelle se lit d'un coup d'œil, et la vue
@@ -707,15 +730,14 @@ export const storeReport = query({
     const weekly = STORE_WEEKS.map((week) =>
       entries.filter((entry) => entry.week === week).reduce((total, entry) => total + entry.amount, 0),
     );
-    const revenue = entries.reduce((total, entry) => total + entry.amount, 0);
-    const bySite = {
-      "60": entries.filter((entry) => entry.site === "60").reduce((total, entry) => total + entry.amount, 0),
-      "76": entries.filter((entry) => entry.site === "76").reduce((total, entry) => total + entry.amount, 0),
-    };
+    const { revenue, bySite } = summarizeStoreRevenue(entries, annualTotals, month);
+    const monthlyHasDetail = monthly.map((_, index) => scoped.some((entry) => entry.month === index));
 
     return {
       label: month === null ? String(year) : `${MONTHS[month]} ${year}`,
       revenue,
+      annualTotals: annualTotals.map(({ site, year, amount, note }) => ({ site, year, amount, note })),
+      monthlyHasDetail,
       monthly,
       weekly,
       bySite,
@@ -874,6 +896,9 @@ export const salesAnalysis = query({
     const delays = items
       .map(daysToSell)
       .filter((value): value is number => value !== undefined);
+    const views = items
+      .map((item) => item.viewsAtSale)
+      .filter((value): value is number => value !== undefined);
     // Quatre paliers : sous la semaine, sous le mois, sous le trimestre, au-delà.
     const buckets = [
       { label: "Moins de 7 jours", max: 7 },
@@ -910,6 +935,14 @@ export const salesAnalysis = query({
       brands: rank(items, (item) => item.brand).slice(0, 10),
       conditions: rank(items, (item) => item.condition).slice(0, 10),
       sizes: rank(items, (item) => item.size).slice(0, 10),
+      views: {
+        measured: views.length,
+        unknown: items.length - views.length,
+        average: views.length
+          ? Math.round(views.reduce((total, value) => total + value, 0) / views.length)
+          : undefined,
+        median: views.length ? Math.round(median(views) ?? 0) : undefined,
+      },
       delay: {
         measured: delays.length,
         /** Articles vendus sans date de mise en ligne : le délai leur échappe. */

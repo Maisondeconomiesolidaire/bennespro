@@ -105,6 +105,7 @@ export const listEvents = query({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
+    const isManager = await canManage(ctx);
     const events = await ctx.db.query("events").withIndex("by_start").order("desc").take(100);
     const photos = await livePhotosByClerkId(ctx, events.map((e) => e.authorClerkId));
     return await Promise.all(
@@ -112,7 +113,7 @@ export const listEvents = query({
         ...event,
         authorImageUrl: livePhoto(photos, event.authorClerkId, event.authorImageUrl),
         imageUrls: await resolveImages(ctx, event.images),
-        canManage: event.authorClerkId === identity.subject,
+        canManage: event.authorClerkId === identity.subject || isManager,
       })),
     );
   },
@@ -625,6 +626,8 @@ export const calendarEvents = query({
   handler: async (ctx, { from, to }) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
+    // L'auteur gère son évènement ; `manage` sur la page gère tous les autres.
+    const isManager = await canManage(ctx);
 
     const own = await ctx.db
       .query("events")
@@ -642,6 +645,7 @@ export const calendarEvents = query({
         start: event.start!,
         end: event.end,
         imageUrls: await resolveImages(ctx, event.images),
+        imageIds: event.images,
         authorName: event.authorName,
         authorImageUrl: livePhoto(photos, event.authorClerkId, event.authorImageUrl),
         animationType: event.animationType,
@@ -652,7 +656,7 @@ export const calendarEvents = query({
         organizer: event.organizer,
         urls: event.urls ?? [],
         attachmentUrls: await resolveImages(ctx, event.attachments ?? []),
-        canManage: event.authorClerkId === identity.subject,
+        canManage: event.authorClerkId === identity.subject || isManager,
       })),
     );
 
@@ -679,6 +683,7 @@ export const calendarEvents = query({
         start: event.startAt,
         end: event.endAt,
         imageUrls: [] as string[],
+        imageIds: [] as Id<"_storage">[],
         authorName: event.structure ?? "Recyclerie",
         structure: event.structure,
         animationType: event.animationType,
@@ -703,6 +708,7 @@ export const undatedEvents = query({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
+    const isManager = await canManage(ctx);
     const events = await ctx.db.query("events").collect();
     const undated = events.filter((event) => event.start === undefined);
     const photos = await livePhotosByClerkId(ctx, undated.map((event) => event.authorClerkId));
@@ -719,6 +725,7 @@ export const undatedEvents = query({
           start: undefined,
           end: undefined,
           imageUrls: await resolveImages(ctx, event.images),
+          imageIds: event.images,
           authorName: event.authorName,
           authorImageUrl: livePhoto(photos, event.authorClerkId, event.authorImageUrl),
           animationType: event.animationType,
@@ -729,7 +736,7 @@ export const undatedEvents = query({
           organizer: event.organizer,
           urls: event.urls ?? [],
           attachmentUrls: await resolveImages(ctx, event.attachments ?? []),
-          canManage: event.authorClerkId === identity.subject,
+          canManage: event.authorClerkId === identity.subject || isManager,
         })),
     );
   },

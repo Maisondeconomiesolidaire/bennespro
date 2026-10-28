@@ -9,6 +9,7 @@ import { canAccess, PAGE_DEPOTS } from "../lib/permissions";
 import { useAccess } from "./RequirePermission";
 import { BillingBadge } from "./ui/BillingBadge";
 import { Modal } from "./ui/Modal";
+import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
 import { Spinner } from "./ui/Spinner";
 import { FullSpinner } from "./ui/Spinner";
@@ -16,6 +17,16 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { useToast } from "./ui/Toast";
 
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+
+type PaymentStatus = "open" | "paid" | "uncollectible" | "void";
+
+/** Statuts de règlement qu'on peut poser à la main sur une facture émise. */
+const PAYMENT_STATUS_OPTIONS: Array<{ value: PaymentStatus; label: string; description: string }> = [
+  { value: "open", label: "En attente de règlement", description: "Le client doit encore régler." },
+  { value: "paid", label: "Payée", description: "Réglée, y compris hors Stripe (virement, chèque…)." },
+  { value: "uncollectible", label: "Irrécouvrable", description: "Le règlement ne sera vraisemblablement jamais perçu." },
+  { value: "void", label: "Annulée", description: "La facture n'est plus due." },
+];
 
 export function DepotDetailModal({
   depotId,
@@ -26,13 +37,35 @@ export function DepotDetailModal({
 }) {
   const depot = useQuery(api.bennespro.getDepot, depotId ? { depotId } : "skip");
   const deleteDepot = useAction(api.bennespro.deleteDepot);
+  const setInvoicePaymentStatus = useAction(api.bennespro.setInvoicePaymentStatus);
   const access = useAccess();
   const toast = useToast();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [nextPaymentStatus, setNextPaymentStatus] = useState<PaymentStatus | null>(null);
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const canDelete = canAccess(access, PAGE_DEPOTS, "delete");
+  const canUpdate = canAccess(access, PAGE_DEPOTS, "update");
+
+  async function handlePaymentStatus() {
+    if (!depotId || !nextPaymentStatus) return;
+    setSavingPayment(true);
+    try {
+      const { syncedWithStripe } = await setInvoicePaymentStatus({ depotId, paymentStatus: nextPaymentStatus });
+      toast.success(
+        syncedWithStripe
+          ? "Statut de règlement mis à jour, Stripe compris."
+          : "Statut de règlement mis à jour dans Bennes & Pro (Stripe ne permet pas ce changement).",
+      );
+      setNextPaymentStatus(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec du changement de statut.");
+    } finally {
+      setSavingPayment(false);
+    }
+  }
 
   async function handleDelete() {
     if (!depotId) return;
@@ -134,6 +167,29 @@ export function DepotDetailModal({
                       <span className="text-xs text-red-600">{depot.billing.error}</span>
                     ) : null}
                   </div>
+                  {canUpdate && depot.billing.status === "invoiced" ? (
+                    <div className="mt-3 max-w-xs">
+                      <p className="mb-1 text-xs text-[var(--muted-foreground)]">Statut de règlement</p>
+                      <Select<PaymentStatus>
+                        value={
+                          PAYMENT_STATUS_OPTIONS.some((o) => o.value === depot.billing?.paymentStatus)
+                            ? (depot.billing.paymentStatus as PaymentStatus)
+                            : ""
+                        }
+                        onChange={(value) => {
+                          if (value !== depot.billing?.paymentStatus) setNextPaymentStatus(value);
+                        }}
+                        options={PAYMENT_STATUS_OPTIONS}
+                        disabled={savingPayment}
+                      />
+                      {depot.billing.paymentStatusUpdatedAt ? (
+                        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                          Modifié à la main le {new Date(depot.billing.paymentStatusUpdatedAt).toLocaleDateString("fr-FR")}
+                          {depot.billing.paymentStatusUpdatedBy ? ` par ${depot.billing.paymentStatusUpdatedBy}` : ""}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -201,6 +257,23 @@ export function DepotDetailModal({
         </div>
       )}
 
+      <ConfirmDialog
+        open={nextPaymentStatus !== null}
+        title="Changer le statut de règlement ?"
+        message={
+          nextPaymentStatus === "paid"
+            ? "La facture sera marquée payée, y compris dans Stripe (règlement hors ligne) : son lien de paiement sera fermé. Stripe ne permet pas d'annuler ce passage."
+            : nextPaymentStatus === "void"
+              ? "La facture sera annulée, y compris dans Stripe : elle ne sera plus due. Stripe ne permet pas d'annuler ce passage."
+              : nextPaymentStatus === "uncollectible"
+                ? "La facture sera marquée irrécouvrable, y compris dans Stripe. Elle pourra encore être réglée."
+                : "La facture sera remise en attente de règlement dans Bennes & Pro."
+        }
+        confirmLabel="Changer le statut"
+        busy={savingPayment}
+        onConfirm={() => void handlePaymentStatus()}
+        onCancel={() => setNextPaymentStatus(null)}
+      />
       <ConfirmDialog
         open={confirmOpen}
         message={

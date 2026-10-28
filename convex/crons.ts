@@ -23,7 +23,7 @@ crons.hourly(
   internal.reservations.requestRoomFeedbackForPastReservations,
 );
 
-// Prévenance de fin de contrat RH : à J-22, J-15 et J-3 de l'échéance du
+// Prévenance de fin de contrat RH : à J-22, J-12 et J-3 de l'échéance du
 // dernier contrat du salarié, aux responsables de sa structure.
 crons.daily(
   "prevenance fin de contrat rh",
@@ -69,5 +69,7 @@ crons.hourly(
   { minuteUTC: 40 },
   internal.klydeGmail.syncAll,
 );
+
+// Social mirrors are refreshed on demand from the sharing workspace.
 
 export default crons;

@@ -205,6 +205,14 @@ export const bpBilling = v.object({
     ),
   ),
   paidAt: v.optional(v.number()),
+  /**
+   * Statut posé à la main que Stripe ne peut pas refléter (ex. facture payée
+   * remise « en attente ») : l'actualisation depuis Stripe ne l'écrase pas.
+   */
+  paymentStatusManual: v.optional(v.boolean()),
+  /** Dernier changement manuel du statut de règlement : qui et quand. */
+  paymentStatusUpdatedBy: v.optional(v.string()),
+  paymentStatusUpdatedAt: v.optional(v.number()),
   /** Horodatage de la dernière relance de règlement envoyée par email. */
   lastReminderAt: v.optional(v.number()),
   error: v.optional(v.string()),
@@ -656,6 +664,14 @@ export default defineSchema(
     assignedTo: v.optional(v.id("teamMembers")),
     /** Équipe opérationnelle Recyclerie (remplace progressivement assignedTo). */
     assignedWorkerId: v.optional(v.id("polyvalentWorkers")),
+    /**
+     * Équipe complète mobilisée sur la demande, depuis le planning.
+     *
+     * Une collecte part rarement seule. `assignedWorkerId` reste renseigné avec
+     * le premier de la liste : les vues et l'index `by_assignedWorkerId` qui
+     * s'appuient dessus continuent de fonctionner sans rien changer.
+     */
+    assignedWorkerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
     estimatedHours: v.optional(v.number()),
     actualHours: v.optional(v.number()),
     quoteAmount: v.optional(v.number()),
@@ -2081,6 +2097,25 @@ export default defineSchema(
     // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
     vintedExtensionCount: v.optional(v.number()),
     vintedLastExtendedAt: v.optional(v.number()),
+    /**
+     * Vente annulée : l'article revient, ou l'acheteur est remboursé.
+     *
+     * - `retour_client` : retour aux frais de l'acheteur — ni gain ni perte ;
+     * - `retour_vendeur` : retour à nos frais (erreur de notre côté) — le port
+     *   reste à notre charge ;
+     * - `remboursement` : somme rendue intégralement, l'acheteur garde l'article.
+     *
+     * Dans tous les cas la vente sort du chiffre d'affaires ; `returnAmount`
+     * porte ce qui reste réellement à notre charge (nul pour `retour_client`).
+     */
+    returnKind: v.optional(v.union(
+      v.literal("retour_client"),
+      v.literal("retour_vendeur"),
+      v.literal("remboursement"),
+    )),
+    returnAmount: v.optional(v.number()),
+    returnedAt: v.optional(v.number()),
+    returnNote: v.optional(v.string()),
     /** Date historique d'encaissement, conservée pour les anciens articles. */
     soldAt: v.optional(v.number()),
     /**
@@ -2130,6 +2165,26 @@ export default defineSchema(
     .index("by_sku", ["sku"])
     .index("by_boutiquePublished", ["publishedOnBoutique"])
     .index("by_featured", ["featured"]),
+
+  /**
+   * Mode vacances de Klyd : la boutique Vinted tourne au ralenti.
+   *
+   * Une ligne par période, ouverte tant que `endedAt` est absent. Pendant une
+   * période, l'ancienneté des annonces cesse de courir et l'alerte des trois
+   * semaines ne part pas : rien ne sert de prévenir qu'un article traîne quand
+   * personne n'est là pour le retirer.
+   *
+   * L'historique est conservé plutôt que de décaler les dates de mise en ligne :
+   * une date de publication déplacée ne se retrouve plus, et deux congés
+   * successifs deviendraient impossibles à démêler.
+   */
+  klydeVacations: defineTable({
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+    createdByClerkId: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_startedAt", ["startedAt"]),
 
   /** Visuels éditoriaux du header de la boutique Klyde. */
   klydeStorefront: defineTable({
@@ -2375,6 +2430,13 @@ export default defineSchema(
   /** Évènements internes affichés dans le calendrier CRM Recycapp. */
   recycappCalendarEvents: defineTable({
     title: v.string(),
+    /**
+     * Auteur de l'évènement (`identity.subject` Clerk). Optionnel : les
+     * évènements créés avant l'ajout du champ, et ceux importés d'un planning,
+     * n'ont pas d'auteur — leur suppression reste réservée à `calendrier:delete`.
+     */
+    authorClerkId: v.optional(v.string()),
+    authorName: v.optional(v.string()),
     animationType: v.optional(v.string()),
     structure: v.optional(v.string()),
     activity: v.optional(v.string()),
@@ -2848,6 +2910,8 @@ export default defineSchema(
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     /** Main d'œuvre requise par mois, en heures (base du plan de charge). */
     requiredMonthlyHours: v.optional(v.number()),
+    /** Nombre de salariés nécessaires simultanément sur la tâche. */
+    requiredWorkers: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_name", ["name"]),
@@ -2859,7 +2923,11 @@ export default defineSchema(
     /** Recycleries de rattachement : un salarié peut intervenir sur les deux. */
     sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
     /** Type de contrat : agent permanent ou agent polyvalent. */
-    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("encadranttechnique"), v.literal("polyvalent"))),
+    /** Le salarié est titulaire du permis de conduire B. */
+    hasDrivingLicenseB: v.optional(v.boolean()),
+    /** Informations libres liées à la fiche salarié. */
+    notes: v.optional(v.string()),
     /** Inactif = conservé pour l'historique mais plus attribuable. */
     active: v.optional(v.boolean()),
     /** Salarié RH correspondant : la fiche RH fait foi pour l'identité. */
@@ -2901,6 +2969,43 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_task", ["taskId"])
+    .index("by_worker", ["workerId"]),
+
+  /** Occurrences détachées du modèle hebdomadaire après un déplacement. */
+  polyvalentRecurrenceExceptions: defineTable({
+    recurrenceId: v.id("polyvalentTaskRecurrences"),
+    originalStartAt: v.number(),
+    /** Une occurrence peut être déplacée vers une activité datée, ou simplement
+     * supprimée. Dans ce dernier cas, aucun remplacement n'est créé. */
+    activityId: v.optional(v.id("polyvalentActivities")),
+  })
+    .index("by_originalStartAt", ["originalStartAt"])
+    .index("by_recurrenceId_and_originalStartAt", ["recurrenceId", "originalStartAt"]),
+
+  /**
+   * Indisponibilités RH d'un salarié : ce qui l'empêche d'être planifié.
+   *
+   * Elles vivent à côté des créneaux de tâches plutôt que dedans : une absence
+   * n'est pas un travail, elle ne compte dans aucune charge et ne réclame aucun
+   * effectif. Les horaires sont stockés comme ceux d'un créneau, pour qu'une
+   * demi-journée reste possible.
+   */
+  polyvalentAbsences: defineTable({
+    workerId: v.id("polyvalentWorkers"),
+    kind: v.union(
+      v.literal("conge"),
+      v.literal("absence"),
+      v.literal("formation"),
+      v.literal("pmsmp"),
+      v.literal("recup"),
+    ),
+    startAt: v.number(),
+    endAt: v.number(),
+    note: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_startAt", ["startAt"])
     .index("by_worker", ["workerId"]),
 
   polyvalentActivities: defineTable({
