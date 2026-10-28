@@ -17,7 +17,7 @@ import { BillingBadge } from "../components/ui/BillingBadge";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useAccess } from "../components/RequirePermission";
-import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
+import { canAccess, PAGE_DEPOTS, PAGE_ENTREPRISES } from "../lib/permissions";
 import { companyTypeLabel, tradeCategoryLabel } from "../lib/companyProfile";
 import { useToast } from "../components/ui/Toast";
 import { CompanyDirectory } from "../components/CompanyDirectory";
@@ -342,7 +342,7 @@ function CompanyDetailModal({
           ) : null}
 
           {tab === "depots" ? (
-            <CompanyDepots depots={company.depots} />
+            <CompanyDepots depots={company.depots} companyId={company._id} />
           ) : null}
         </div>
       )}
@@ -364,7 +364,95 @@ function CompanyDetailModal({
 
 type CompanyDepot = Doc<"bpDepots"> & { vehicleLabel: string };
 
-function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
+/** Factures mensuelles groupées de l'entreprise (dépôts du 1er novembre 2026 et après). */
+function CompanyMonthlyInvoices({ companyId }: { companyId: Id<"bpCompanies"> }) {
+  const invoices = useQuery(api.bennespro.listCompanyMonthlyInvoices, { companyId });
+  const retry = useMutation(api.bennespro.retryMonthlyInvoice);
+  const access = useAccess();
+  const toast = useToast();
+  const canUpdate = canAccess(access, PAGE_DEPOTS, "update");
+  const [retrying, setRetrying] = useState<Id<"bpMonthlyInvoices"> | null>(null);
+
+  if (!invoices || invoices.length === 0) return null;
+
+  async function handleRetry(monthlyInvoiceId: Id<"bpMonthlyInvoices">) {
+    setRetrying(monthlyInvoiceId);
+    try {
+      await retry({ monthlyInvoiceId });
+      toast.success("Émission de la facture mensuelle relancée.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de la relance.");
+    } finally {
+      setRetrying(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-[var(--foreground)]">Factures mensuelles</p>
+      <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
+            <tr>
+              <th className="px-3 py-2 font-semibold">Mois</th>
+              <th className="px-3 py-2 font-semibold">Dépôts</th>
+              <th className="px-3 py-2 font-semibold">Détail</th>
+              <th className="px-3 py-2 font-semibold">Montant</th>
+              <th className="px-3 py-2 font-semibold">Facture</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((invoice) => (
+              <tr key={invoice._id} className="border-t border-[var(--border)] align-top">
+                <td className="px-3 py-2 font-semibold capitalize text-[var(--foreground)]">{invoice.periodLabel}</td>
+                <td className="px-3 py-2 text-[var(--muted-foreground)]">{invoice.depotIds.length}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {invoice.items.map((item) => (
+                      <span key={item.material} className="rounded-md bg-[var(--muted)] px-2 py-1 text-xs text-[var(--foreground)]">
+                        {item.material === DIB_MATERIAL ? "DIB" : item.material} · {QTY.format(item.weightKg)} kg
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                  {EUR.format(invoice.amountCents / 100)} HT
+                  <br />
+                  {EUR.format(Math.round(invoice.amountCents * (1 + invoice.vatRate / 100)) / 100)} TTC
+                </td>
+                <td className="px-3 py-2">
+                  {invoice.status === "invoiced" && invoice.stripeInvoiceUrl ? (
+                    <a
+                      href={invoice.stripeInvoiceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline"
+                    >
+                      Stripe <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : invoice.status === "error" ? (
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="text-xs text-red-600">{invoice.error ?? "Erreur d'émission."}</span>
+                      {canUpdate ? (
+                        <Button size="sm" variant="secondary" disabled={retrying === invoice._id} onClick={() => void handleRetry(invoice._id)}>
+                          Relancer
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-[var(--muted-foreground)]">En cours d'émission</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CompanyDepots({ depots, companyId }: { depots: CompanyDepot[]; companyId: Id<"bpCompanies"> }) {
   const totalPaidCents = depots.reduce((sum, depot) => {
     if (depot.billing?.paymentStatus !== "paid") return sum;
     return sum + Math.round(depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100));
@@ -392,6 +480,8 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
         <SummaryStat icon={Receipt} label="Total facturé" value={EUR.format(totalInvoicedCents / 100)} />
         <SummaryStat icon={Truck} label="Poids facturé" value={`${QTY.format(billableKg)} kg`} />
       </div>
+
+      <CompanyMonthlyInvoices companyId={companyId} />
 
       <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
         <table className="w-full min-w-[760px] text-sm">
@@ -437,6 +527,7 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
                       <BillingBadge
                         status={depot.billing.status}
                         paymentStatus={depot.billing.paymentStatus}
+                        monthly={depot.billing.monthly}
                       />
                       <span className="whitespace-nowrap text-xs text-[var(--muted-foreground)]">
                         {EUR.format((depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100)) / 100)} TTC

@@ -4,15 +4,20 @@ import { cn } from "../../lib/cn";
 export function BillingBadge({
   status,
   paymentStatus,
+  monthly,
 }: {
   status: "pending" | "invoiced" | "error";
   paymentStatus?: "draft" | "open" | "paid" | "void" | "uncollectible";
+  /** Dépôt facturé au mois : il attend la facture groupée du 1er. */
+  monthly?: boolean;
 }) {
   const label =
     status === "error"
       ? "Erreur"
       : status === "pending"
-        ? "En cours"
+        ? monthly
+          ? "Facture mensuelle à venir"
+          : "En cours"
         : paymentStatus === "paid"
           ? "Payée"
           : paymentStatus === "void"
@@ -28,7 +33,8 @@ export function BillingBadge({
         "inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold",
         status === "invoiced" && paymentStatus === "paid" && "bg-brand-100 text-brand-700",
         status === "invoiced" && paymentStatus !== "paid" && "bg-amber-100 text-amber-700",
-        status === "pending" && "bg-amber-100 text-amber-700",
+        status === "pending" && !monthly && "bg-amber-100 text-amber-700",
+        status === "pending" && monthly && "bg-sky-100 text-sky-700",
         status === "error" && "bg-red-100 text-red-700",
       )}
     >
