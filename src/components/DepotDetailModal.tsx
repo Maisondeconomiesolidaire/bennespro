@@ -143,7 +143,6 @@ export function DepotDetailModal({
                     <BillingBadge
                       status={depot.billing.status}
                       paymentStatus={depot.billing.paymentStatus}
-                      monthly={depot.billing.monthly}
                     />
                     <span className="text-xs font-medium text-[var(--muted-foreground)]">
                       {EUR.format(depot.billing.amountCents / 100)} HT ·{" "}
@@ -168,18 +167,9 @@ export function DepotDetailModal({
                       <span className="text-xs text-red-600">{depot.billing.error}</span>
                     ) : null}
                   </div>
-                  {depot.billing.monthly ? (
-                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                      {depot.billing.monthlyInvoiceId
-                        ? "Repris dans la facture mensuelle groupée de l'entreprise."
-                        : "Facturation mensuelle : ce dépôt sera repris dans la facture groupée du 1er du mois prochain."}
-                    </p>
-                  ) : null}
                   {canUpdate && depot.billing.status === "invoiced" ? (
                     <div className="mt-3 max-w-xs">
-                      <p className="mb-1 text-xs text-[var(--muted-foreground)]">
-                        Statut de règlement{depot.billing.monthlyInvoiceId ? " (toute la facture mensuelle)" : ""}
-                      </p>
+                      <p className="mb-1 text-xs text-[var(--muted-foreground)]">Statut de règlement</p>
                       <Select<PaymentStatus>
                         value={
                           PAYMENT_STATUS_OPTIONS.some((o) => o.value === depot.billing?.paymentStatus)

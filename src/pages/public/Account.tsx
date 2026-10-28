@@ -598,7 +598,7 @@ export function AccountDepots() {
               </p>
             </div>
             {depot.billing ? (
-              <BillingBadge status={depot.billing.status} paymentStatus={depot.billing.paymentStatus} monthly={depot.billing.monthly} />
+              <BillingBadge status={depot.billing.status} paymentStatus={depot.billing.paymentStatus} />
             ) : null}
           </div>
 

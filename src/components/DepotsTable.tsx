@@ -342,7 +342,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     <td className="px-4 py-3">
                       {d.billing ? (
                         <div className="flex flex-col items-start gap-1">
-                          <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} monthly={d.billing.monthly} />
+                          <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} />
                           {d.billing.lastReminderAt ? (
                             <span className="whitespace-nowrap text-[11px] text-[var(--muted-foreground)]">
                               Dernière relance le {formatReminder(d.billing.lastReminderAt)}
@@ -391,7 +391,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
                     </p>
                   </div>
                   {d.billing ? (
-                    <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} monthly={d.billing.monthly} />
+                    <BillingBadge status={d.billing.status} paymentStatus={d.billing.paymentStatus} />
                   ) : weight > 0 ? (
                     <span className="inline-flex whitespace-nowrap rounded-full bg-[var(--muted)] px-2.5 py-1 text-xs font-semibold text-[var(--muted-foreground)]">
                       Non facturé
