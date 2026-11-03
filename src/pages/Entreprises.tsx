@@ -17,9 +17,11 @@ import { BillingBadge } from "../components/ui/BillingBadge";
 import type { Doc } from "../../convex/_generated/dataModel";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useAccess } from "../components/RequirePermission";
-import { canAccess, PAGE_ENTREPRISES } from "../lib/permissions";
+import { canAccess, PAGE_ENTREPRISES, PAGE_DEPOTS } from "../lib/permissions";
 import { companyTypeLabel, tradeCategoryLabel } from "../lib/companyProfile";
 import { useToast } from "../components/ui/Toast";
+import { CompanyInvoiceGrouping } from "../components/CompanyInvoiceGrouping";
+import { canGroupDeposit } from "../../convex/lib/bpMonthlyBilling";
 import { CompanyDirectory } from "../components/CompanyDirectory";
 import { CompanyModal, type CompanyForm } from "../components/CompanyModal";
 
@@ -342,7 +344,7 @@ function CompanyDetailModal({
           ) : null}
 
           {tab === "depots" ? (
-            <CompanyDepots depots={company.depots} />
+            <CompanyDepots key={company._id} companyId={company._id} depots={company.depots} />
           ) : null}
         </div>
       )}
@@ -364,7 +366,22 @@ function CompanyDetailModal({
 
 type CompanyDepot = Doc<"bpDepots"> & { vehicleLabel: string };
 
-function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
+function CompanyDepots({ companyId, depots }: { companyId: Id<"bpCompanies">; depots: CompanyDepot[] }) {
+  const access = useAccess();
+  const canGroup = canAccess(access, PAGE_DEPOTS, "update");
+  const [selectedIds, setSelectedIds] = useState<Set<Id<"bpDepots">>>(new Set());
+  const blockedInvoices = new Set(depots.filter(d => !canGroupDeposit(d)).flatMap(d => d.billing?.stripeInvoiceId ? [d.billing.stripeInvoiceId] : []));
+  const eligible = depots.filter(d => canGroupDeposit(d) && !blockedInvoices.has(d.billing?.stripeInvoiceId ?? ""));
+  const eligibleIds = new Set(eligible.map(d => d._id));
+  const selected = eligible.filter(d => selectedIds.has(d._id));
+  function toggle(depot: CompanyDepot, checked: boolean) {
+    const related = depot.billing?.stripeInvoiceId ? eligible.filter(d => d.billing?.stripeInvoiceId === depot.billing!.stripeInvoiceId) : [depot];
+    setSelectedIds(old => {
+      const next = new Set(old);
+      for (const d of related) { if (checked) next.add(d._id); else next.delete(d._id); }
+      return next;
+    });
+  }
   const totalPaidCents = depots.reduce((sum, depot) => {
     if (depot.billing?.paymentStatus !== "paid") return sum;
     return sum + Math.round(depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100));
@@ -393,10 +410,13 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
         <SummaryStat icon={Truck} label="Poids facturé" value={`${QTY.format(billableKg)} kg`} />
       </div>
 
+      <CompanyInvoiceGrouping companyId={companyId} selected={selected} canGroup={canGroup} onCreated={() => setSelectedIds(new Set())} />
+
       <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-[var(--muted)] text-left text-xs text-[var(--muted-foreground)]">
             <tr>
+              {canGroup ? <th className="px-3 py-2"><input type="checkbox" aria-label="Sélectionner tous les dépôts éligibles" disabled={eligible.length === 0} checked={eligible.length > 0 && selected.length === eligible.length} onChange={e => setSelectedIds(new Set(e.target.checked ? eligible.map(d => d._id) : []))} /></th> : null}
               <th className="px-3 py-2 font-semibold">N°</th>
               <th className="px-3 py-2 font-semibold">Date</th>
               <th className="px-3 py-2 font-semibold">Véhicule</th>
@@ -408,6 +428,7 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
           <tbody>
             {depots.map((depot) => (
               <tr key={depot._id} className="border-t border-[var(--border)] align-top">
+                {canGroup ? <td className="px-3 py-2"><input type="checkbox" aria-label={`Regrouper le dépôt n° ${depot.depotNumber}`} disabled={!eligibleIds.has(depot._id)} checked={eligibleIds.has(depot._id) && selectedIds.has(depot._id)} onChange={e => toggle(depot, e.target.checked)} /></td> : null}
                 <td className="px-3 py-2 font-semibold text-[var(--foreground)]">
                   {String(depot.depotNumber).padStart(4, "0")}
                 </td>
@@ -434,10 +455,11 @@ function CompanyDepots({ depots }: { depots: CompanyDepot[] }) {
                 <td className="px-3 py-2">
                   {depot.billing ? (
                     <div className="flex flex-col items-start gap-1">
-                      <BillingBadge
+                      {depot.billing.groupingId ? <span className="text-xs font-semibold text-brand-600">Regroupement en cours</span> : <BillingBadge
                         status={depot.billing.status}
                         paymentStatus={depot.billing.paymentStatus}
-                      />
+                      />}
+                      {depot.billing.replacedStripeInvoiceIds?.length ? <span className="text-xs text-[var(--muted-foreground)]">Facture groupée · anciennes factures remplacées</span> : null}
                       <span className="whitespace-nowrap text-xs text-[var(--muted-foreground)]">
                         {EUR.format((depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100)) / 100)} TTC
                       </span>
