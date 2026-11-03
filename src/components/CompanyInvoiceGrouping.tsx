@@ -1,3 +1,4 @@
+import { billingTotals } from "../../convex/lib/bpMonthlyBilling";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -21,8 +22,10 @@ export function CompanyInvoiceGrouping({ companyId, selected, canGroup, onCreate
   const toast = useToast();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const total = selected.reduce((sum, d) => sum + (d.billing?.amountCents ?? 0), 0);
-  const amount = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(total / 100);
+  const totals = billingTotals(selected);
+  const euros = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+  const amount = euros.format(totals.ht / 100);
+  const amountTtc = euros.format(totals.ttc / 100);
   const previousCount = new Set(selected.flatMap(d => d.billing?.stripeInvoiceId ? [d.billing.stripeInvoiceId] : [])).size;
   async function submit() {
     if (busy) return;
@@ -38,10 +41,10 @@ export function CompanyInvoiceGrouping({ companyId, selected, canGroup, onCreate
   return <div className="space-y-3">
     {canGroup ? <div className="rounded-lg border border-[var(--border)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><p className="font-semibold">Facture groupée</p><p className="text-sm text-[var(--muted-foreground)]">{selected.length} dépôt(s) sélectionné(s) · {amount} HT</p></div>
+        <div><p className="font-semibold">Facture groupée</p><p className="text-sm text-[var(--muted-foreground)]">{selected.length} dépôt(s) sélectionné(s) · {amount} HT · <strong>{amountTtc} TTC</strong></p></div>
         <Button disabled={busy || selected.length < 2 || selected.length > 250} onClick={() => setConfirm(true)}>Regrouper et envoyer</Button>
       </div>
-      <p className="mt-2 text-xs text-[var(--muted-foreground)]">Sélectionnez les dépôts DIB / Bois à regrouper. Les anciennes factures encore impayées seront annulées et remplacées par une facture détaillée unique envoyée au client. Les factures réglées ou annulées sont exclues. Une facture déjà groupée se sélectionne en entier.</p>
+      <p className="mt-2 text-xs text-[var(--muted-foreground)]">Sélectionnez les dépôts DIB / Bois à regrouper. Les anciennes factures encore impayées seront annulées et remplacées par une facture détaillée unique envoyée au client, accompagnée de tous les bons de dépôt concernés. Les factures réglées ou annulées sont exclues. Une facture déjà groupée se sélectionne en entier.</p>
       {selected.length > 250 ? <p className="mt-2 text-sm text-red-600">250 dépôts maximum par facture Stripe. Réduisez la sélection.</p> : null}
     </div> : null}
     {batches?.filter(b => b.kind === "manual").map(batch => <div key={batch._id} role="status" className="rounded-lg border border-[var(--border)] p-3 text-sm">
@@ -51,6 +54,6 @@ export function CompanyInvoiceGrouping({ companyId, selected, canGroup, onCreate
       {batch.stripeInvoiceUrl ? <a className="mt-2 inline-block font-semibold text-brand-600 underline" href={batch.stripeInvoiceUrl} target="_blank" rel="noreferrer">Ouvrir la facture groupée</a> : null}
       {canGroup && batch.status === "pending" && batch.error ? <Button size="sm" variant="secondary" className="mt-2" onClick={() => { void retry({ id: batch._id }).catch(error => toast.error(error instanceof Error ? error.message : "Reprise impossible.")); }}>Reprendre le regroupement</Button> : null}
     </div>)}
-    <ConfirmDialog open={confirm} title="Créer la facture groupée ?" message={`${selected.length} dépôts, ${amount} HT. Les ${previousCount} anciennes factures encore impayées seront annulées puis remplacées par une facture détaillée envoyée au client. Le statut Stripe est revérifié avant l'annulation : les règlements intervenus entre-temps seront exclus.`} confirmLabel="Regrouper et envoyer" busy={busy} onConfirm={() => void submit()} onCancel={() => setConfirm(false)} />
+    <ConfirmDialog open={confirm} title="Créer la facture groupée ?" message={`${selected.length} dépôts, ${amount} HT / ${amountTtc} TTC. Les ${previousCount} anciennes factures encore impayées seront annulées puis remplacées par une facture détaillée envoyée au client. Le statut Stripe est revérifié avant l'annulation : les règlements intervenus entre-temps seront exclus.`} confirmLabel="Regrouper et envoyer" busy={busy} onConfirm={() => void submit()} onCancel={() => setConfirm(false)} />
   </div>;
 }
