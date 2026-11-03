@@ -80,7 +80,7 @@ function shell(opts: { preheader: string; heading: string; intro: string; conten
           <tr>
             <td class="px" style="padding:20px 32px;background:#faf7f2;border-top:1px solid #f1e9dd;">
               <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#b8b0a4;">
-                Message automatique — merci de ne pas y répondre. Écrivez-nous depuis la messagerie de votre espace client.
+                Message automatique — merci de ne pas y répondre. Une question ? Appelez BâtiRe au <a href="tel:+33375150475" style="color:${BRAND};font-weight:700;text-decoration:none;">03 75 15 04 75</a> ou écrivez-nous depuis la messagerie de votre espace client.
               </p>
             </td>
           </tr>
@@ -270,6 +270,46 @@ export const sendOrderReceipt = internalAction({
         button(`${appUrl()}/mon-compte`, "Mon espace client"),
     });
     await resendSend(args.to, `Commande ${args.reference} confirmée`, html, FROM);
+  },
+});
+
+/** Confirmation d'une réservation, réglée au retrait. */
+export const sendReservationConfirmation = internalAction({
+  args: {
+    to: v.string(),
+    firstName: v.string(),
+    reference: v.string(),
+    title: v.string(),
+    quantity: v.number(),
+    unit: v.string(),
+    amountCents: v.number(),
+    pickupLocation: v.object({ name: v.string(), address: v.string() }),
+  },
+  handler: async (_ctx, args) => {
+    const total = (args.amountCents / 100).toLocaleString("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+    });
+    const html = shell({
+      preheader: `Réservation ${args.reference} enregistrée.`,
+      heading: "Votre réservation est enregistrée",
+      intro:
+        `Bonjour ${esc(args.firstName)},<br/><br/>` +
+        `Votre réservation <strong>${esc(args.reference)}</strong> est bien enregistrée. Le règlement se fait sur place, au retrait.`,
+      contentHtml:
+        `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">
+          <tr><td style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(args.title)}</td>
+              <td align="right" style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
+          <tr><td style="padding:10px 0;font-weight:700;color:#18181b;">Total à régler au retrait</td>
+              <td align="right" style="padding:10px 0;font-weight:700;color:#18181b;">${esc(total)}</td></tr>
+        </table>` +
+        note(
+          "Retrait",
+          `${args.pickupLocation.name} — ${args.pickupLocation.address}. Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture.`,
+        ) +
+        button(`${appUrl()}/mon-compte`, "Mon espace client"),
+    });
+    await resendSend(args.to, `Réservation ${args.reference} enregistrée`, html, FROM);
   },
 });
 

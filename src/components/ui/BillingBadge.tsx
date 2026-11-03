@@ -12,7 +12,7 @@ export function BillingBadge({
     status === "error"
       ? "Erreur"
       : status === "pending"
-        ? "En cours"
+        ? "À facturer en fin de mois"
         : paymentStatus === "paid"
           ? "Payée"
           : paymentStatus === "void"

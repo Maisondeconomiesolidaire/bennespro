@@ -149,7 +149,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
     setBillingId(depotId);
     try {
       await billDepot({ depotId });
-      toast.success("Facturation lancée. La facture Stripe est en cours d'émission.");
+      toast.success("Montant enregistré pour la prochaine facture mensuelle.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de la facturation.");
     } finally {
@@ -262,7 +262,7 @@ export function DepotsTable({ depots }: { depots: DepotListItem[] }) {
             }}
           >
             {billingId === d._id ? <Spinner className="h-4 w-4" /> : <Receipt className="h-4 w-4" />}
-            {d.billing?.status === "error" ? "Refacturer" : "Facturer"}
+            Ajouter à la facture mensuelle
           </Button>
         ) : null}
       </div>

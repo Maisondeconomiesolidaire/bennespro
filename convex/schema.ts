@@ -177,6 +177,8 @@ export const bpBillingLine = v.object({
 
 /** App « Bennes & Pro » — facturation Stripe des matières payantes d'un dépôt. */
 export const bpBilling = v.object({
+  month: v.optional(v.string()),
+  monthlyInvoiceId: v.optional(v.id("bpMonthlyInvoices")),
   /** Poids total facturable en kg (lignes kg + tonnes converties). */
   weightKg: v.number(),
   /** Prix appliqué, en centimes d'euro par kg (HT). */
@@ -273,17 +275,22 @@ export const btUnit = v.union(
 );
 
 export const btCondition = v.union(
+  /* Référentiel actuel : les cinq états de Leboncoin, mot pour mot, pour que
+   * l'extension Bâtire → Leboncoin les reporte sans traduction. */
+  v.literal("État neuf"),
+  v.literal("Très bon état"),
+  v.literal("Bon état"),
+  v.literal("État satisfaisant"),
+  v.literal("Pour pièces"),
+  /** @deprecated Anciens référentiels (quatre valeurs, puis la liste
+   *  d'origine). Conservés pour les fiches créées avant le changement :
+   *  retirer ces valeurs les rendrait invalides. */
   v.literal("Neuf"),
   v.literal("Très bon"),
   v.literal("Bon"),
   v.literal("Usagé"),
-  /** @deprecated Référentiel d'états d'avant la simplification en quatre
-   *  valeurs. Conservé pour les fiches créées avant le changement : retirer
-   *  ces valeurs les rendrait invalides. */
   v.literal("Déstockage"),
   v.literal("Reconditionné"),
-  v.literal("Très bon état"),
-  v.literal("Bon état"),
   v.literal("À reconditionner"),
   v.literal("À rénover"),
 );
@@ -524,6 +531,8 @@ export default defineSchema(
     caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     internalReference: v.optional(v.string()),
+    /** Référence GDR de l'article (logiciel de gestion), saisie à la main. */
+    gdrReference: v.optional(v.string()),
     /**
      * Recyclerie qui détient physiquement l'article : le client vient le
      * retirer sur ce site, et la boutique en ligne permet de filtrer dessus.
@@ -531,6 +540,8 @@ export default defineSchema(
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    /** Hiérarchie Label Emmaüs complète, de l'univers au niveau le plus précis. */
+    categoryPath: v.optional(v.array(v.string())),
     condition: v.string(),
     keywords: v.optional(v.array(v.string())),
     themeKey: v.optional(v.string()),
@@ -2541,6 +2552,19 @@ export default defineSchema(
   }).index("by_company", ["companyId"]),
 
   /** Dépôts de déchets. Les lignes de déchets sont embarquées dans le doc. */
+  bpMonthlyInvoices: defineTable({
+    companyId: v.id("bpCompanies"),
+    month: v.string(),
+    depotIds: v.array(v.id("bpDepots")),
+    lines: v.array(bpBillingLine),
+    status: v.union(v.literal("pending"), v.literal("sent")),
+    leaseUntil: v.number(),
+    stripeInvoiceId: v.optional(v.string()),
+    error: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+  }).index("by_company_month", ["companyId", "month"])
+    .index("by_status", ["status"]),
+
   bpDepots: defineTable({
     depotNumber: v.number(),
     companyId: v.id("bpCompanies"),
@@ -2575,7 +2599,9 @@ export default defineSchema(
   })
     .index("by_company", ["companyId"])
     .index("by_number", ["depotNumber"])
-    .index("by_profile", ["createdByProfileId"])
+      .index("by_monthly_pending", ["billing.status", "billing.month"])
+      .index("by_company_month", ["companyId", "billing.month"])
+      .index("by_profile", ["createdByProfileId"])
     .index("by_createdAt", ["createdAt"]),
 
   // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
@@ -3200,7 +3226,8 @@ export default defineSchema(
   })
     .index("by_outcome", ["outcome"])
     .index("by_reference", ["reference"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_user_createdAt", ["userId", "createdAt"]),
 
   /** Ventes Bâtire : paiement en ligne (boutique) ou au terminal (kiosque). */
   btOrders: defineTable({
@@ -3213,6 +3240,8 @@ export default defineSchema(
     unitPrice: v.number(),
     /** Montant total en centimes, tel qu'encaissé par Stripe. */
     amountCents: v.number(),
+    /** Transfert du lot vers un autre point de retrait (facturé une seule fois par panier). */
+    pickupFeeCents: v.optional(v.number()),
     customer: v.object({
       firstName: v.string(),
       lastName: v.string(),
@@ -3230,7 +3259,13 @@ export default defineSchema(
       ),
     ),
     channel: v.union(v.literal("boutique"), v.literal("terminal")),
-    status: v.union(v.literal("en_attente"), v.literal("payee"), v.literal("annulee")),
+    status: v.union(
+      v.literal("en_attente"),
+      v.literal("payee"),
+      v.literal("annulee"),
+      /** Réservée en ligne, réglée au retrait : pas de paiement Stripe. */
+      v.literal("reservee"),
+    ),
     stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
     paidAt: v.optional(v.number()),
@@ -3240,7 +3275,8 @@ export default defineSchema(
     .index("by_status", ["status"])
     .index("by_reference", ["reference"])
     .index("by_material", ["materialId"])
-    .index("by_stripeSession", ["stripeSessionId"]),
+    .index("by_stripeSession", ["stripeSessionId"])
+    .index("by_user_createdAt", ["userId", "createdAt"]),
 
   /**
    * Messagerie Bâtire : un fil par client et par matériau.
@@ -3487,6 +3523,12 @@ export default defineSchema(
   })
     .index("by_projectId", ["projectId"])
     .index("by_taskId", ["taskId"]),
+
+  /** Miniature (~480 px) d'une photo du stockage, pour les grilles. Voir thumbnails.ts. */
+  storageThumbnails: defineTable({
+    source: v.id("_storage"),
+    thumb: v.id("_storage"),
+  }).index("by_source", ["source"]),
   },
   { schemaValidation: false },
 );

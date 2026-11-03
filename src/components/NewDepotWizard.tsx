@@ -510,7 +510,7 @@ export function NewDepotWizard({
           </p>
           {saved?.items.some((it) => it.material === DIB_MATERIAL || it.material === WOOD_MATERIAL) ? (
             <p className="mt-2 max-w-md rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">
-              Ce dépôt contient une matière facturable : la facture Stripe est émise automatiquement (suivi dans l'onglet
+              Le montant de ce dépôt est enregistré. Une facture Stripe regroupant les dépôts DIB / Bois du mois sera envoyée le 1er du mois suivant (suivi dans l'onglet
               « DIB & facturation »).
             </p>
           ) : null}
