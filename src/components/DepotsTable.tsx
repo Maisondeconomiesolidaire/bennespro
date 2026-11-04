@@ -69,7 +69,7 @@ export function DepotStats({ depots, countLabel }: { depots: DepotListItem[]; co
   for (const d of depots) {
     billableKg += billableWeightKg(d.items);
     const b = d.billing;
-    if (b && b.status === "invoiced") {
+    if (b && b.status === "invoiced" && b.paymentStatus !== "void") {
       const ttc = ttcCents(b.amountCents, b.vatRate ?? 20);
       invoicedTtc += ttc;
       if (b.paymentStatus === "paid") paidTtc += ttc;

@@ -387,7 +387,7 @@ function CompanyDepots({ companyId, depots }: { companyId: Id<"bpCompanies">; de
     return sum + Math.round(depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100));
   }, 0);
   const totalInvoicedCents = depots.reduce((sum, depot) => {
-    if (!depot.billing) return sum;
+    if (!depot.billing || depot.billing.paymentStatus === "void") return sum;
     return sum + Math.round(depot.billing.amountCents * (1 + (depot.billing.vatRate ?? 20) / 100));
   }, 0);
   const billableKg = depots.reduce((sum, depot) => sum + (depot.billing?.weightKg ?? 0), 0);
